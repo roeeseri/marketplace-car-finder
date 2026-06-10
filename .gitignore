@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Processed data and index artifacts
+data/processed/
+
+# Model and embedding cache
+.cache/
+*.npy
+*.bin
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
