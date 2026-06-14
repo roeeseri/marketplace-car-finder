@@ -786,7 +786,7 @@ def main():
         c1.metric("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}")
         c2.metric("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}")
         c3.metric("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}")
-        c4.metric("Judge samples", str(len(report["judge_sample"])))
+        c4.metric("NLU P/R Mean", f"{report['nlu']['combined']['pr_mean']:.3f}")
 
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "NLU", "Retrieval", "Ablation", "Time / Memory", "Judge"
@@ -814,6 +814,9 @@ def main():
             }, {
                 "Metric": "Combined F1",
                 "Value": f"{report['nlu']['combined']['f1']:.3f}",
+            }, {
+                "Metric": "Combined P/R Mean",
+                "Value": f"{report['nlu']['combined']['pr_mean']:.3f}",
             }])
 
         with tab2:

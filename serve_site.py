@@ -108,6 +108,7 @@ def _render_overview(report) -> str:
         {_metric_card("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}", "Exact slot extraction on the required fields", "blue")}
         {_metric_card("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}", "Preference detection such as family, luxury, or first owner", "indigo")}
         {_metric_card("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}", "Average of hard and soft F1", "emerald")}
+        {_metric_card("NLU P/R Mean", f"{report['nlu']['combined']['pr_mean']:.3f}", "Average of precision and recall", "amber")}
         {_metric_card("Smart P@5", f"{report['retrieval']['smart'].precision_at_k:.3f}", "Semantic + rule-based ranking", "indigo")}
         {_metric_card("Baseline P@5", f"{report['retrieval']['baseline'].precision_at_k:.3f}", "Lexical baseline comparator", "amber")}
         {_metric_card("Judge samples", str(len(report['judge_sample'])), "LLM sample reviewed for quality", "amber")}
@@ -130,6 +131,7 @@ def _render_overview(report) -> str:
             <tr><th>Soft recall</th><td>{report['nlu']['soft']['recall']:.3f}</td></tr>
             <tr><th>Soft F1</th><td>{report['nlu']['soft']['f1']:.3f}</td></tr>
             <tr><th>Combined F1</th><td>{report['nlu']['combined']['f1']:.3f}</td></tr>
+            <tr><th>Combined P/R mean</th><td>{report['nlu']['combined']['pr_mean']:.3f}</td></tr>
           </table>
         </div>
         <div class="subpanel">

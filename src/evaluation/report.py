@@ -129,6 +129,8 @@ def evaluate_nlu(cases: Sequence[EvaluationCase] = BENCHMARK_CASES) -> Dict[str,
         "precision": (hard["precision"] + soft["precision"]) / 2,
         "recall": (hard["recall"] + soft["recall"]) / 2,
         "f1": (hard["f1"] + soft["f1"]) / 2,
+        "pr_mean": ((hard["precision"] + soft["precision"]) / 2 + (hard["recall"] + soft["recall"]) / 2) / 2,
+        "soft_pr_mean": (soft["precision"] + soft["recall"]) / 2,
     }
     return {
         "precision": hard["precision"],
@@ -186,6 +188,16 @@ def evaluate_case_rows(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, k
             "nlu_combined_f1": (
                 slot_precision_recall_f1(predicted=_hard_prediction(parsed), expected=case.expected_constraints)["f1"]
                 + slot_precision_recall_f1(predicted=_soft_prediction(parsed), expected=_soft_expected(case))["f1"]
+            ) / 2,
+            "nlu_combined_pr": (
+                (
+                    slot_precision_recall_f1(predicted=_hard_prediction(parsed), expected=case.expected_constraints)["precision"]
+                    + slot_precision_recall_f1(predicted=_soft_prediction(parsed), expected=_soft_expected(case))["precision"]
+                ) / 2
+                + (
+                    slot_precision_recall_f1(predicted=_hard_prediction(parsed), expected=case.expected_constraints)["recall"]
+                    + slot_precision_recall_f1(predicted=_soft_prediction(parsed), expected=_soft_expected(case))["recall"]
+                ) / 2
             ) / 2,
             "smart_p@5": precision_at_k(smart_rel, k),
             "smart_r@5": recall_at_k(smart_rel, k, total_relevant),
