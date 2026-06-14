@@ -10,6 +10,7 @@ from src.data.loader import load_from_csv
 from src.data.preprocessor import preprocess_all
 from src.data.validator import validate_all
 from src.explanation.explainer import explain
+from src.evaluation.report import build_full_report
 from src.nlu.query_parser import parse_query
 from src.ranking.ranker import RankingWeights, rank
 from src.search.embedder import Embedder
@@ -533,10 +534,15 @@ def _get_pipeline():
     return valid_ads, searcher, len(invalid)
 
 
+@st.cache_data(show_spinner="מריץ הערכות…")
+def _get_evaluation_report():
+    return build_full_report()
+
+
 def run_search(query: str):
     valid_ads, searcher, _ = _get_pipeline()
     parsed = parse_query(query)
-    hits = searcher.search(parsed.semantic_query, k=min(len(valid_ads), 50))
+    hits = searcher.search(parsed.semantic_query, k=len(valid_ads))
     ad_map = {ad.ad_id: ad for ad in valid_ads}
     candidates = [(ad_map[h.ad_id], h.score) for h in hits if h.ad_id in ad_map]
     candidate_ads = [ad for ad, _ in candidates]
@@ -773,6 +779,90 @@ def main():
 
     _render_hero()
     search_clicked = _render_search_area()
+
+    with st.expander("הערכות לפי פרק 5", expanded=False):
+        report = _get_evaluation_report()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}")
+        c2.metric("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}")
+        c3.metric("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}")
+        c4.metric("Judge samples", str(len(report["judge_sample"])))
+
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "NLU", "Retrieval", "Ablation", "Time / Memory", "Judge"
+        ])
+
+        with tab1:
+            st.table([{
+                "Metric": "Hard Precision",
+                "Value": f"{report['nlu']['hard']['precision']:.3f}",
+            }, {
+                "Metric": "Hard Recall",
+                "Value": f"{report['nlu']['hard']['recall']:.3f}",
+            }, {
+                "Metric": "Hard F1",
+                "Value": f"{report['nlu']['hard']['f1']:.3f}",
+            }, {
+                "Metric": "Soft Precision",
+                "Value": f"{report['nlu']['soft']['precision']:.3f}",
+            }, {
+                "Metric": "Soft Recall",
+                "Value": f"{report['nlu']['soft']['recall']:.3f}",
+            }, {
+                "Metric": "Soft F1",
+                "Value": f"{report['nlu']['soft']['f1']:.3f}",
+            }, {
+                "Metric": "Combined F1",
+                "Value": f"{report['nlu']['combined']['f1']:.3f}",
+            }])
+
+        with tab2:
+            st.table([{
+                "Variant": "Smart",
+                "P@5": f"{report['retrieval']['smart'].precision_at_k:.3f}",
+                "R@5": f"{report['retrieval']['smart'].recall_at_k:.3f}",
+                "NDCG@5": f"{report['retrieval']['smart'].ndcg_at_k:.3f}",
+            }, {
+                "Variant": "Baseline",
+                "P@5": f"{report['retrieval']['baseline'].precision_at_k:.3f}",
+                "R@5": f"{report['retrieval']['baseline'].recall_at_k:.3f}",
+                "NDCG@5": f"{report['retrieval']['baseline'].ndcg_at_k:.3f}",
+            }, {
+                "Variant": "No rerank",
+                "P@5": f"{report['retrieval']['no_rerank'].precision_at_k:.3f}",
+                "R@5": f"{report['retrieval']['no_rerank'].recall_at_k:.3f}",
+                "NDCG@5": f"{report['retrieval']['no_rerank'].ndcg_at_k:.3f}",
+            }])
+            st.dataframe(report["case_rows"], use_container_width=True)
+
+        with tab3:
+            st.table([{
+                "Variant": "No semantic",
+                "P@5": f"{report['ablation']['no_semantic'].precision_at_k:.3f}",
+                "R@5": f"{report['ablation']['no_semantic'].recall_at_k:.3f}",
+                "NDCG@5": f"{report['ablation']['no_semantic'].ndcg_at_k:.3f}",
+            }, {
+                "Variant": "No rerank",
+                "P@5": f"{report['ablation']['no_rerank'].precision_at_k:.3f}",
+                "R@5": f"{report['ablation']['no_rerank'].recall_at_k:.3f}",
+                "NDCG@5": f"{report['ablation']['no_rerank'].ndcg_at_k:.3f}",
+            }])
+
+        with tab4:
+            st.table([{
+                "Variant": "Smart",
+                "Mean ms": f"{report['timings']['smart'].mean_ms:.2f}",
+                "Median ms": f"{report['timings']['smart'].median_ms:.2f}",
+                "Peak KB": f"{report['timings']['smart'].peak_kb:.1f}",
+            }, {
+                "Variant": "Baseline",
+                "Mean ms": f"{report['timings']['baseline'].mean_ms:.2f}",
+                "Median ms": f"{report['timings']['baseline'].median_ms:.2f}",
+                "Peak KB": f"{report['timings']['baseline'].peak_kb:.1f}",
+            }])
+
+        with tab5:
+            st.write(report["judge_sample"][:20])
 
     # Run search
     if search_clicked:

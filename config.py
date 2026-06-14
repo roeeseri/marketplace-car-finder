@@ -5,7 +5,8 @@ BASE_DIR = Path(__file__).parent
 # Data paths
 DATA_RAW_DIR = BASE_DIR / "data" / "raw"
 DATA_PROCESSED_DIR = BASE_DIR / "data" / "processed"
-SAMPLE_CSV = DATA_RAW_DIR / "sample_ads.csv"
+SAMPLE_CSV = DATA_RAW_DIR / "used_cars_505_ads_with_upgrade_text.csv"
+SMALL_SAMPLE_CSV = DATA_RAW_DIR / "sample_ads.csv"
 PROCESSED_CSV = DATA_PROCESSED_DIR / "ads_processed.csv"
 EMBEDDINGS_PATH = DATA_PROCESSED_DIR / "embeddings.npy"
 
