@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -37,11 +38,11 @@ AD_MAP = {str(ad.ad_id): ad for ad in ADS}
 REPORT = None
 
 EXAMPLE_QUERIES = [
-    "Mazda 3 automatic up to 70k",
-    "Toyota first owner without accidents",
-    "Hybrid up to 100k fuel efficient",
-    "BMW automatic up to 150k",
-    "Family car with low mileage",
+    "רכב לסטודנט עד 40 אלף",
+    "אוטו קטן לעיר, חסכוני, בלי כאב ראש",
+    "טויוטה יד ראשונה ללא תאונות עד 70 אלף",
+    "רכב חדש חדש למתחיל עם קילומטראז' נמוך",
+    "ב.מ.וו אוטומטי עד 150 אלף",
 ]
 
 
@@ -50,6 +51,11 @@ def _get_report():
     if REPORT is None:
         REPORT = build_full_report()
     return REPORT
+
+
+def _is_admin(params: dict) -> bool:
+    admin_flag = params.get("admin", ["0"])[0].strip().lower()
+    return admin_flag in {"1", "true", "yes", "on"} or os.getenv("CAR_SEARCH_AGENT_ADMIN") == "1"
 
 
 def _smart_search(query: str, top_n: int = 10):
@@ -233,7 +239,7 @@ def _render_search(query: str, results) -> str:
     else:
         result_cards = """
         <div class="empty-state">
-          Type a query and press Search to see ranked results.
+          הקלד שאילתה ולחץ על חיפוש כדי לראות תוצאות מדורגות.
         </div>
         """
 
@@ -262,16 +268,41 @@ def _render_search(query: str, results) -> str:
     <section class="panel">
       <div class="section-head">
         <h2>Results</h2>
-        <p>{html.escape(query) if query else 'No query yet.'}</p>
+        <p>{html.escape(query) if query else 'עדיין לא בוצעה שאילתה.'}</p>
       </div>
       <div class="results-grid">{result_cards}</div>
     </section>
     """
 
 
-def _render_page(page: str, query: str = "", results=None):
+def _render_page(page: str, query: str = "", results=None, params=None):
     report = _get_report()
-    body_inner = _render_overview(report) if page == "overview" else _render_search(query, results or [])
+    if page == "overview":
+        if _is_admin(params or {}):
+            body_inner = _render_overview(report)
+        else:
+            body_inner = """
+            <section class="hero">
+              <div class="eyebrow">Chapter 5 evaluation dashboard</div>
+              <h1>Car Search Agent</h1>
+              <p class="lede">Separate evaluation view, so the metrics stay clean and easy to present.</p>
+              <div class="nav"><a class="chip active" href="/">Overview</a><a class="chip" href="/?page=search">Search Demo</a></div>
+              <div class="hero-actions">
+                <a class="primary-link" href="/?page=search">Open search demo</a>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="section-head">
+                <h2>Evaluation summary</h2>
+                <p>Report numbers are hidden for non-admin viewers.</p>
+              </div>
+              <div class="empty-state">
+                רק אדמיניסטרטור יכול לראות את מספרי ה-report. הוסף `?admin=1` לכתובת כדי להציג אותם.
+              </div>
+            </section>
+            """
+    else:
+        body_inner = _render_search(query, results or [])
     return f"""<!doctype html>
 <html lang="en" dir="rtl">
 <head>
@@ -669,7 +700,7 @@ class Handler(BaseHTTPRequestHandler):
         if page == "search" and query:
             _, results = _smart_search(query)
 
-        body = _render_page(page, query, results).encode("utf-8")
+        body = _render_page(page, query, results, params).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

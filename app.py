@@ -25,11 +25,11 @@ from src.search.semantic_search import load_semantic_search
 TOP_N = 10
 
 EXAMPLE_QUERIES = [
-    "מאזדה 3 אוטומטי עד 70 אלף",
-    "טויוטה יד ראשונה ללא תאונות",
-    "היברידי עד 100 אלף חסכוני",
-    "BMW אוטומטי עד 150 אלף",
-    "רכב משפחתי ידני עד 60 אלף",
+    "רכב לסטודנט עד 40 אלף",
+    "אוטו קטן לעיר, חסכוני, בלי כאב ראש",
+    "טויוטה יד ראשונה ללא תאונות עד 70 אלף",
+    "רכב חדש חדש למתחיל עם קילומטראז' נמוך",
+    "ב.מ.וו אוטומטי עד 150 אלף",
 ]
 
 _SOFT_LABELS = {
@@ -539,6 +539,19 @@ def _get_evaluation_report():
     return build_full_report()
 
 
+def _is_admin_mode() -> bool:
+    if os.getenv("CAR_SEARCH_AGENT_ADMIN") == "1":
+        return True
+    try:
+        params = getattr(st, "query_params", {})
+        admin = params.get("admin", "0")
+        if isinstance(admin, list):
+            admin = admin[0] if admin else "0"
+        return str(admin).strip().lower() in {"1", "true", "yes", "on"}
+    except Exception:
+        return False
+
+
 def run_search(query: str):
     valid_ads, searcher, _ = _get_pipeline()
     parsed = parse_query(query)
@@ -780,92 +793,93 @@ def main():
     _render_hero()
     search_clicked = _render_search_area()
 
-    with st.expander("הערכות לפי פרק 5", expanded=False):
-        report = _get_evaluation_report()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}")
-        c2.metric("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}")
-        c3.metric("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}")
-        c4.metric("NLU P/R Mean", f"{report['nlu']['combined']['pr_mean']:.3f}")
+    if _is_admin_mode():
+        with st.expander("הערכות לפי פרק 5", expanded=False):
+            report = _get_evaluation_report()
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}")
+            c2.metric("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}")
+            c3.metric("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}")
+            c4.metric("NLU P/R Mean", f"{report['nlu']['combined']['pr_mean']:.3f}")
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "NLU", "Retrieval", "Ablation", "Time / Memory", "Judge"
-        ])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "NLU", "Retrieval", "Ablation", "Time / Memory", "Judge"
+            ])
 
-        with tab1:
-            st.table([{
-                "Metric": "Hard Precision",
-                "Value": f"{report['nlu']['hard']['precision']:.3f}",
-            }, {
-                "Metric": "Hard Recall",
-                "Value": f"{report['nlu']['hard']['recall']:.3f}",
-            }, {
-                "Metric": "Hard F1",
-                "Value": f"{report['nlu']['hard']['f1']:.3f}",
-            }, {
-                "Metric": "Soft Precision",
-                "Value": f"{report['nlu']['soft']['precision']:.3f}",
-            }, {
-                "Metric": "Soft Recall",
-                "Value": f"{report['nlu']['soft']['recall']:.3f}",
-            }, {
-                "Metric": "Soft F1",
-                "Value": f"{report['nlu']['soft']['f1']:.3f}",
-            }, {
-                "Metric": "Combined F1",
-                "Value": f"{report['nlu']['combined']['f1']:.3f}",
-            }, {
-                "Metric": "Combined P/R Mean",
-                "Value": f"{report['nlu']['combined']['pr_mean']:.3f}",
-            }])
+            with tab1:
+                st.table([{
+                    "Metric": "Hard Precision",
+                    "Value": f"{report['nlu']['hard']['precision']:.3f}",
+                }, {
+                    "Metric": "Hard Recall",
+                    "Value": f"{report['nlu']['hard']['recall']:.3f}",
+                }, {
+                    "Metric": "Hard F1",
+                    "Value": f"{report['nlu']['hard']['f1']:.3f}",
+                }, {
+                    "Metric": "Soft Precision",
+                    "Value": f"{report['nlu']['soft']['precision']:.3f}",
+                }, {
+                    "Metric": "Soft Recall",
+                    "Value": f"{report['nlu']['soft']['recall']:.3f}",
+                }, {
+                    "Metric": "Soft F1",
+                    "Value": f"{report['nlu']['soft']['f1']:.3f}",
+                }, {
+                    "Metric": "Combined F1",
+                    "Value": f"{report['nlu']['combined']['f1']:.3f}",
+                }, {
+                    "Metric": "Combined P/R Mean",
+                    "Value": f"{report['nlu']['combined']['pr_mean']:.3f}",
+                }])
 
-        with tab2:
-            st.table([{
-                "Variant": "Smart",
-                "P@5": f"{report['retrieval']['smart'].precision_at_k:.3f}",
-                "R@5": f"{report['retrieval']['smart'].recall_at_k:.3f}",
-                "NDCG@5": f"{report['retrieval']['smart'].ndcg_at_k:.3f}",
-            }, {
-                "Variant": "Baseline",
-                "P@5": f"{report['retrieval']['baseline'].precision_at_k:.3f}",
-                "R@5": f"{report['retrieval']['baseline'].recall_at_k:.3f}",
-                "NDCG@5": f"{report['retrieval']['baseline'].ndcg_at_k:.3f}",
-            }, {
-                "Variant": "No rerank",
-                "P@5": f"{report['retrieval']['no_rerank'].precision_at_k:.3f}",
-                "R@5": f"{report['retrieval']['no_rerank'].recall_at_k:.3f}",
-                "NDCG@5": f"{report['retrieval']['no_rerank'].ndcg_at_k:.3f}",
-            }])
-            st.dataframe(report["case_rows"], use_container_width=True)
+            with tab2:
+                st.table([{
+                    "Variant": "Smart",
+                    "P@5": f"{report['retrieval']['smart'].precision_at_k:.3f}",
+                    "R@5": f"{report['retrieval']['smart'].recall_at_k:.3f}",
+                    "NDCG@5": f"{report['retrieval']['smart'].ndcg_at_k:.3f}",
+                }, {
+                    "Variant": "Baseline",
+                    "P@5": f"{report['retrieval']['baseline'].precision_at_k:.3f}",
+                    "R@5": f"{report['retrieval']['baseline'].recall_at_k:.3f}",
+                    "NDCG@5": f"{report['retrieval']['baseline'].ndcg_at_k:.3f}",
+                }, {
+                    "Variant": "No rerank",
+                    "P@5": f"{report['retrieval']['no_rerank'].precision_at_k:.3f}",
+                    "R@5": f"{report['retrieval']['no_rerank'].recall_at_k:.3f}",
+                    "NDCG@5": f"{report['retrieval']['no_rerank'].ndcg_at_k:.3f}",
+                }])
+                st.dataframe(report["case_rows"], use_container_width=True)
 
-        with tab3:
-            st.table([{
-                "Variant": "No semantic",
-                "P@5": f"{report['ablation']['no_semantic'].precision_at_k:.3f}",
-                "R@5": f"{report['ablation']['no_semantic'].recall_at_k:.3f}",
-                "NDCG@5": f"{report['ablation']['no_semantic'].ndcg_at_k:.3f}",
-            }, {
-                "Variant": "No rerank",
-                "P@5": f"{report['ablation']['no_rerank'].precision_at_k:.3f}",
-                "R@5": f"{report['ablation']['no_rerank'].recall_at_k:.3f}",
-                "NDCG@5": f"{report['ablation']['no_rerank'].ndcg_at_k:.3f}",
-            }])
+            with tab3:
+                st.table([{
+                    "Variant": "No semantic",
+                    "P@5": f"{report['ablation']['no_semantic'].precision_at_k:.3f}",
+                    "R@5": f"{report['ablation']['no_semantic'].recall_at_k:.3f}",
+                    "NDCG@5": f"{report['ablation']['no_semantic'].ndcg_at_k:.3f}",
+                }, {
+                    "Variant": "No rerank",
+                    "P@5": f"{report['ablation']['no_rerank'].precision_at_k:.3f}",
+                    "R@5": f"{report['ablation']['no_rerank'].recall_at_k:.3f}",
+                    "NDCG@5": f"{report['ablation']['no_rerank'].ndcg_at_k:.3f}",
+                }])
 
-        with tab4:
-            st.table([{
-                "Variant": "Smart",
-                "Mean ms": f"{report['timings']['smart'].mean_ms:.2f}",
-                "Median ms": f"{report['timings']['smart'].median_ms:.2f}",
-                "Peak KB": f"{report['timings']['smart'].peak_kb:.1f}",
-            }, {
-                "Variant": "Baseline",
-                "Mean ms": f"{report['timings']['baseline'].mean_ms:.2f}",
-                "Median ms": f"{report['timings']['baseline'].median_ms:.2f}",
-                "Peak KB": f"{report['timings']['baseline'].peak_kb:.1f}",
-            }])
+            with tab4:
+                st.table([{
+                    "Variant": "Smart",
+                    "Mean ms": f"{report['timings']['smart'].mean_ms:.2f}",
+                    "Median ms": f"{report['timings']['smart'].median_ms:.2f}",
+                    "Peak KB": f"{report['timings']['smart'].peak_kb:.1f}",
+                }, {
+                    "Variant": "Baseline",
+                    "Mean ms": f"{report['timings']['baseline'].mean_ms:.2f}",
+                    "Median ms": f"{report['timings']['baseline'].median_ms:.2f}",
+                    "Peak KB": f"{report['timings']['baseline'].peak_kb:.1f}",
+                }])
 
-        with tab5:
-            st.write(report["judge_sample"][:20])
+            with tab5:
+                st.write(report["judge_sample"][:20])
 
     # Run search
     if search_clicked:
