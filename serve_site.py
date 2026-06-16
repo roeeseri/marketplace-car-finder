@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -10,11 +9,12 @@ from src.data.feature_extractor import extract_all
 from src.data.loader import load_from_csv
 from src.data.preprocessor import preprocess_all
 from src.data.validator import validate_all
-from src.evaluation.report import build_full_report
+from src.data.schema import CarAd
 from src.explanation.explainer import explain
 from src.knowledge.vehicle_insights import build_insight_bundle
 from src.nlu.query_parser import parse_query
 from src.ranking.ranker import RankingWeights, rank
+from src.valuation.calculator import estimate_car_value
 from src.search.embedder import Embedder
 from src.search.filter import filter_ads
 from src.search.index_builder import build_faiss_index, build_id_map
@@ -36,27 +36,6 @@ EMBEDDER = Embedder()
 SEARCH_INDEX = build_faiss_index(EMBEDDER.encode_ads(ADS))
 SEARCHER = SemanticSearch(SEARCH_INDEX, build_id_map(ADS), EMBEDDER)
 AD_MAP = {str(ad.ad_id): ad for ad in ADS}
-REPORT = None
-
-EXAMPLE_QUERIES = [
-    "רכב לסטודנט עד 40 אלף",
-    "אוטו קטן לעיר, חסכוני, בלי כאב ראש",
-    "טויוטה יד ראשונה ללא תאונות עד 70 אלף",
-    "רכב חדש חדש למתחיל עם קילומטראז' נמוך",
-    "ב.מ.וו אוטומטי עד 150 אלף",
-]
-
-
-def _get_report():
-    global REPORT
-    if REPORT is None:
-        REPORT = build_full_report()
-    return REPORT
-
-
-def _is_admin(params: dict) -> bool:
-    admin_flag = params.get("admin", ["0"])[0].strip().lower()
-    return admin_flag in {"1", "true", "yes", "on"} or os.getenv("CAR_SEARCH_AGENT_ADMIN") == "1"
 
 
 def _smart_search(query: str, top_n: int = 10):
@@ -68,699 +47,675 @@ def _smart_search(query: str, top_n: int = 10):
     if not filtered:
         return parsed, []
     ranked = rank(filtered, parsed, RankingWeights())[:top_n]
-    pairs = [
+    return parsed, [
         (result, explain(result.ad, parsed, result), build_insight_bundle(result.ad, parsed, result))
         for result in ranked
     ]
-    return parsed, pairs
 
 
-def _nav(active: str) -> str:
-    items = [
-        ("overview", "Overview", "/"),
-        ("search", "Search Demo", "/?page=search"),
-    ]
-    chips = []
-    for page, label, href in items:
-        cls = "chip active" if page == active else "chip"
-        chips.append(f'<a class="{cls}" href="{href}">{label}</a>')
-    return '<div class="nav">' + "".join(chips) + "</div>"
+def _parse_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
 
 
-def _metric_card(label: str, value: str, note: str = "", accent: str = "blue") -> str:
+def _parse_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _render_valuation_block(params: dict) -> str:
+    calc_make = params.get("calc_make", [""])[0]
+    calc_model = params.get("calc_model", [""])[0]
+    calc_year = _parse_int(params.get("calc_year", [""])[0])
+    calc_km = _parse_float(params.get("calc_km", [""])[0])
+    calc_gear = params.get("calc_gear", [""])[0]
+    calc_fuel = params.get("calc_fuel", [""])[0]
+    calc_owners = _parse_int(params.get("calc_owners", [""])[0])
+    calc_location = params.get("calc_location", [""])[0]
+    calc_condition = params.get("calc_condition", [""])[0]
+    valuation_html = ""
+
+    if calc_make and calc_year is not None and calc_km is not None:
+        target = CarAd(
+            ad_id="calc",
+            make=calc_make,
+            model=calc_model or "",
+            year=calc_year,
+            price=0,
+            km=calc_km,
+            gear_type=calc_gear or None,
+            fuel_type=calc_fuel or None,
+            previous_owners=calc_owners,
+            location=calc_location or None,
+            description="",
+        )
+        estimate = estimate_car_value(
+            target=target,
+            ads=ADS,
+            target_condition=calc_condition or None,
+        )
+        max_count = max(estimate.histogram_counts) if estimate.histogram_counts else 1
+        histogram_html = "".join(
+            f"""
+            <div class="hist-row">
+              <div class="hist-label">{html.escape(label)}</div>
+              <div class="hist-track"><div class="hist-fill" style="width:{max(8, int((count / max_count) * 100))}%"></div></div>
+              <div class="hist-count">{count}</div>
+            </div>
+            """
+            for label, count in zip(estimate.histogram_labels, estimate.histogram_counts)
+        )
+        valuation_html = f"""
+        <div class="valuation-result">
+          <div class="valuation-head">
+            <div>
+              <div class="valuation-kicker">הערכת שווי משוערת</div>
+              <h3>{html.escape(calc_make)} {html.escape(calc_model or '')}</h3>
+            </div>
+            <div class="valuation-score">אמון {estimate.confidence:.2f}</div>
+          </div>
+          <div class="valuation-range">
+            {estimate.low_price:,} &#8362; - {estimate.high_price:,} &#8362;
+          </div>
+          <div class="valuation-price">{estimate.estimated_price:,} &#8362;</div>
+          <div class="valuation-note">מבוסס על {estimate.comparable_count} רכבים דומים מתוך הדאטה שלנו.</div>
+          <div class="valuation-reasons">
+            {"".join(f'<span class="valuation-chip">{html.escape(reason)}</span>' for reason in estimate.reasons)}
+          </div>
+          <div class="valuation-preview">
+            {"".join(f'<div class="valuation-preview-item">{html.escape(item)}</div>' for item in estimate.comparable_preview)}
+          </div>
+          <div class="valuation-hist">
+            <div class="mini-title">התפלגות מחירי רכבים דומים</div>
+            <div class="histogram">{histogram_html}</div>
+          </div>
+        </div>
+        """
+
     return f"""
-    <div class="metric metric-{accent}">
-      <div class="metric-label">{html.escape(label)}</div>
-      <div class="metric-value">{html.escape(value)}</div>
-      {f'<div class="metric-note">{html.escape(note)}</div>' if note else ''}
-    </div>
-    """
-
-
-def _render_overview(report) -> str:
-    return f"""
-    <section class="hero">
-      <div class="eyebrow">Chapter 5 evaluation dashboard</div>
-      <h1>Car Search Agent</h1>
-      <p class="lede">Separate evaluation view, so the metrics stay clean and easy to present.</p>
-      {_nav("overview")}
-      <div class="hero-actions">
-        <a class="primary-link" href="/?page=search">Open search demo</a>
-      </div>
-    </section>
-
-    <section class="panel">
+    <section class="section" id="valuation">
       <div class="section-head">
-        <h2>Core metrics</h2>
-        <p>Overall performance across the dataset and evaluation setup.</p>
+        <h2>מחשבון שווי</h2>
+        <p>הערכה מהירה על בסיס רכבים דומים מהדאטה שלנו, כדי להבין אם הרכב יקר או זול יחסית לשוק.</p>
       </div>
-      <div class="metrics-grid">
-        {_metric_card("NLU Hard F1", f"{report['nlu']['hard']['f1']:.3f}", "Exact slot extraction on the required fields", "blue")}
-        {_metric_card("NLU Soft F1", f"{report['nlu']['soft']['f1']:.3f}", "Preference detection such as family, luxury, or first owner", "indigo")}
-        {_metric_card("NLU Combined F1", f"{report['nlu']['combined']['f1']:.3f}", "Average of hard and soft F1", "emerald")}
-        {_metric_card("NLU P/R Mean", f"{report['nlu']['combined']['pr_mean']:.3f}", "Average of precision and recall", "amber")}
-        {_metric_card("Smart P@5", f"{report['retrieval']['smart'].precision_at_k:.3f}", "Semantic + rule-based ranking", "indigo")}
-        {_metric_card("Baseline P@5", f"{report['retrieval']['baseline'].precision_at_k:.3f}", "Lexical baseline comparator", "amber")}
-        {_metric_card("Judge samples", str(len(report['judge_sample'])), "LLM sample reviewed for quality", "amber")}
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <h2>Evaluation summary</h2>
-        <p>These tables are meant for the presentation and report.</p>
-      </div>
-      <div class="stacked-panels">
-        <div class="subpanel">
-          <h3>NLU</h3>
-          <table>
-            <tr><th>Hard precision</th><td>{report['nlu']['hard']['precision']:.3f}</td></tr>
-            <tr><th>Hard recall</th><td>{report['nlu']['hard']['recall']:.3f}</td></tr>
-            <tr><th>Hard F1</th><td>{report['nlu']['hard']['f1']:.3f}</td></tr>
-            <tr><th>Soft precision</th><td>{report['nlu']['soft']['precision']:.3f}</td></tr>
-            <tr><th>Soft recall</th><td>{report['nlu']['soft']['recall']:.3f}</td></tr>
-            <tr><th>Soft F1</th><td>{report['nlu']['soft']['f1']:.3f}</td></tr>
-            <tr><th>Combined F1</th><td>{report['nlu']['combined']['f1']:.3f}</td></tr>
-            <tr><th>Combined P/R mean</th><td>{report['nlu']['combined']['pr_mean']:.3f}</td></tr>
-          </table>
+      <form class="valuation-form" id="valuation-form" method="post" action="/#valuation">
+        <input type="hidden" name="q" value="{html.escape(params.get('q', [''])[0])}" />
+        <div class="valuation-grid">
+          <input type="text" id="calc_make" name="calc_make" placeholder="יצרן" value="{html.escape(calc_make)}" />
+          <input type="text" id="calc_model" name="calc_model" placeholder="דגם" value="{html.escape(calc_model)}" />
+          <input type="number" id="calc_year" name="calc_year" placeholder="שנתון" value="{'' if calc_year is None else calc_year}" />
+          <input type="number" id="calc_km" name="calc_km" placeholder="ק״מ" value="{'' if calc_km is None else int(calc_km)}" />
+          <input type="text" id="calc_gear" name="calc_gear" placeholder="תיבה" value="{html.escape(calc_gear)}" />
+          <input type="text" id="calc_fuel" name="calc_fuel" placeholder="דלק" value="{html.escape(calc_fuel)}" />
+          <input type="number" id="calc_owners" name="calc_owners" placeholder="מספר בעלים" value="{'' if calc_owners is None else calc_owners}" />
+          <input type="text" id="calc_location" name="calc_location" placeholder="מיקום" value="{html.escape(calc_location)}" />
+          <select id="calc_condition" name="calc_condition">
+            <option value="">מצב הרכב</option>
+            <option value="מעולה" {"selected" if calc_condition == "מעולה" else ""}>מעולה</option>
+            <option value="טוב" {"selected" if calc_condition == "טוב" else ""}>טוב</option>
+            <option value="סביר" {"selected" if calc_condition == "סביר" else ""}>סביר</option>
+            <option value="דורש השקעה" {"selected" if calc_condition == "דורש השקעה" else ""}>דורש השקעה</option>
+          </select>
         </div>
-        <div class="subpanel">
-          <h3>Retrieval</h3>
-          <table>
-            <tr><th>Smart NDCG@5</th><td>{report['retrieval']['smart'].ndcg_at_k:.3f}</td></tr>
-            <tr><th>Baseline NDCG@5</th><td>{report['retrieval']['baseline'].ndcg_at_k:.3f}</td></tr>
-            <tr><th>No rerank P@5</th><td>{report['retrieval']['no_rerank'].precision_at_k:.3f}</td></tr>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <h2>Per-query table</h2>
-        <p>Use this for the detailed evaluation slide.</p>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Query</th>
-              <th>Smart P@5</th>
-              <th>Baseline P@5</th>
-              <th>Smart NDCG@5</th>
-              <th>Baseline NDCG@5</th>
-            </tr>
-          </thead>
-          <tbody>
-            {"".join(
-                f"<tr><td>{html.escape(row['query'])}</td><td>{row['smart_p@5']:.3f}</td><td>{row['baseline_p@5']:.3f}</td><td>{row['smart_ndcg@5']:.3f}</td><td>{row['baseline_ndcg@5']:.3f}</td></tr>"
-                for row in report["case_rows"]
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <h2>Ablation and timing</h2>
-        <p>Shows the effect of semantic search and reranking.</p>
-      </div>
-      <div class="stacked-panels">
-        <div class="subpanel">
-          <h3>Ablation</h3>
-          <table>
-            <tr><th>No semantic P@5</th><td>{report['ablation']['no_semantic'].precision_at_k:.3f}</td></tr>
-            <tr><th>No rerank P@5</th><td>{report['ablation']['no_rerank'].precision_at_k:.3f}</td></tr>
-            <tr><th>No rerank NDCG@5</th><td>{report['ablation']['no_rerank'].ndcg_at_k:.3f}</td></tr>
-          </table>
-        </div>
-        <div class="subpanel">
-          <h3>Timing</h3>
-          <table>
-            <tr><th>Smart mean</th><td>{report['timings']['smart'].mean_ms:.2f} ms</td></tr>
-            <tr><th>Baseline mean</th><td>{report['timings']['baseline'].mean_ms:.2f} ms</td></tr>
-            <tr><th>Smart peak</th><td>{report['timings']['smart'].peak_kb:.1f} KB</td></tr>
-            <tr><th>Baseline peak</th><td>{report['timings']['baseline'].peak_kb:.1f} KB</td></tr>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <h2>Judge sample</h2>
-        <p>Short preview of the scored examples.</p>
-      </div>
-      <div class="sample-list">
-        {"".join(
-            f"<div class='sample-item'><strong>{html.escape(item['query'])}</strong><span>{html.escape(item['make'])} {html.escape(item['model'])}</span><em>score {item['score']}</em><p>{html.escape(item['rationale'])}</p></div>"
-            for item in report["judge_sample"][:10]
-        )}
-      </div>
+        <button type="submit">חשב שווי</button>
+      </form>
+      <div class="valuation-help">אפשר גם ללחוץ על "חשב שווי" מתוך כל כרטיס תוצאה כדי למלא את הטופס אוטומטית.</div>
+      {valuation_html}
     </section>
     """
 
 
-def _render_search(query: str, results) -> str:
+def _render_page(query: str = "", results=None, params: dict | None = None) -> str:
+    params = params or {}
     result_cards = ""
     if results:
-        for i, (result, expl, insight) in enumerate(results, 1):
+        for i, (result, explanation, insight) in enumerate(results, 1):
             ad = result.ad
-            chips_html = "".join(
-                f'<span class="insight-chip">{html.escape(item)}</span>'
-                for item in insight.similarity_reasons
+            similar_html = "".join(
+                f'<span class="chip">{html.escape(text)}</span>'
+                for text in insight.similarity_reasons
             )
-            source_html = ""
-            if insight.source and insight.source.source_url:
-                source_html = f"""
-                <div class="insight-box">
-                  <div class="insight-title">מקור רשמי</div>
-                  <a class="source-link" href="{html.escape(insight.source.source_url)}" target="_blank" rel="noreferrer">
-                    {html.escape(insight.source.source_name)}
+            source = insight.source
+            source_block = ""
+            if source:
+                source_text = source.excerpt or source.summary or ""
+                source_block = f"""
+                <details class="panel-mini">
+                  <summary class="mini-title">מקור רשמי לדגם</summary>
+                  <a class="source-link" href="{html.escape(source.source_url)}" target="_blank" rel="noreferrer">
+                    {html.escape(source.source_name)}
                   </a>
-                  <div class="source-summary">{html.escape(insight.source.summary)}</div>
-                </div>
+                  <div class="source-body">{html.escape(source_text)}</div>
+                </details>
                 """
             result_cards += f"""
             <article class="card">
               <div class="card-top">
                 <div>
-                  <div class="card-kicker">Result #{i}</div>
+                  <div class="rank">תוצאה #{i}</div>
                   <h3>{html.escape(ad.make)} {html.escape(ad.model)} {ad.year}</h3>
                 </div>
-                <div class="score-pill">{result.total_score:.3f}</div>
+                <div class="score">{result.total_score:.3f}</div>
               </div>
-              <div class="card-meta">{int(ad.price):,} ₪ | {int(ad.km):,} km | {html.escape(ad.gear_type or '')} | {html.escape(ad.location or '')}</div>
-              <p class="card-desc">{html.escape(expl)}</p>
-              <div class="insight-panel">
-                <div class="insight-box">
-                  <div class="insight-title">למה זה דומה?</div>
-                  <div class="insight-chips">{chips_html}</div>
+              <div class="meta">{int(ad.price):,} &#8362; &middot; {int(ad.km):,} ק"מ &middot; {html.escape(ad.gear_type or '')} &middot; {html.escape(ad.location or '')}</div>
+              <div class="explanation">{html.escape(explanation)}</div>
+              <div class="insight">
+                <div class="panel-mini">
+                  <div class="mini-title">למה הרכב דומה?</div>
+                  <div class="chips">{similar_html}</div>
                 </div>
-                {source_html}
+                {source_block}
+              </div>
+              <div class="card-actions">
+                <button
+                  type="button"
+                  class="calc-link"
+                  data-calc-make="{html.escape(ad.make)}"
+                  data-calc-model="{html.escape(ad.model)}"
+                  data-calc-year="{ad.year}"
+                  data-calc-km="{int(ad.km)}"
+                  data-calc-gear="{html.escape(ad.gear_type or '')}"
+                  data-calc-fuel="{html.escape(ad.fuel_type or '')}"
+                  data-calc-owners="{html.escape(str(ad.previous_owners or ''))}"
+                  data-calc-location="{html.escape(ad.location or '')}"
+                >חשב שווי במחשבון</button>
               </div>
             </article>
             """
     else:
         result_cards = """
         <div class="empty-state">
-          הקלד שאילתה ולחץ על חיפוש כדי לראות תוצאות מדורגות.
+          כתוב חיפוש, למשל: רכב קטן לעיר, חסכוני, אוטומטי
         </div>
         """
 
-    return f"""
-    <section class="hero">
-      <div class="eyebrow">Live search demo</div>
-      <h1>Show results here</h1>
-      <p class="lede">This page is only for searches and results, so it is easy to demo on its own.</p>
-      {_nav("search")}
-      <div class="hero-actions">
-        <a class="secondary-link" href="/">Back to evaluations</a>
-      </div>
-      <form class="search-form" method="get" action="/">
-        <input type="hidden" name="page" value="search" />
-        <input type="text" name="q" value="{html.escape(query)}" placeholder="Try: Mazda 3 automatic under 70k" />
-        <button type="submit">Search</button>
-      </form>
-      <div class="examples">
-        {"".join(
-            f'<a class="example-chip" href="/?page=search&q={urllib.parse.quote_plus(ex)}">{html.escape(ex)}</a>'
-            for ex in EXAMPLE_QUERIES
-        )}
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <h2>Results</h2>
-        <p>{html.escape(query) if query else 'עדיין לא בוצעה שאילתה.'}</p>
-      </div>
-      <div class="results-grid">{result_cards}</div>
-    </section>
-    """
-
-
-def _render_page(page: str, query: str = "", results=None, params=None):
-    report = _get_report()
-    if page == "overview":
-        if _is_admin(params or {}):
-            body_inner = _render_overview(report)
-        else:
-            body_inner = """
-            <section class="hero">
-              <div class="eyebrow">Chapter 5 evaluation dashboard</div>
-              <h1>Car Search Agent</h1>
-              <p class="lede">Separate evaluation view, so the metrics stay clean and easy to present.</p>
-              <div class="nav"><a class="chip active" href="/">Overview</a><a class="chip" href="/?page=search">Search Demo</a></div>
-              <div class="hero-actions">
-                <a class="primary-link" href="/?page=search">Open search demo</a>
-              </div>
-            </section>
-            <section class="panel">
-              <div class="section-head">
-                <h2>Evaluation summary</h2>
-                <p>Report numbers are hidden for non-admin viewers.</p>
-              </div>
-              <div class="empty-state">
-                רק אדמיניסטרטור יכול לראות את מספרי ה-report. הוסף `?admin=1` לכתובת כדי להציג אותם.
-              </div>
-            </section>
-            """
-    else:
-        body_inner = _render_search(query, results or [])
     return f"""<!doctype html>
-<html lang="en" dir="rtl">
+<html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Car Search Agent</title>
+  <title>מנוע חיפוש רכבים</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {{
-      --bg: #f8fafc;
-      --panel: rgba(255,255,255,.82);
+      --bg: #f4f7fb;
+      --panel: rgba(255,255,255,.92);
       --card: #ffffff;
       --text: #0f172a;
-      --muted: #475569;
-      --border: #dbe4f0;
-      --blue: #2563eb;
-      --blue-strong: #1d4ed8;
-      --blue-soft: #eff6ff;
-      --shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+      --muted: #516074;
+      --line: #dbe4f0;
+      --accent: #0f766e;
+      --accent-2: #155e75;
+      --accent-soft: #ecfeff;
+      --shadow: 0 16px 44px rgba(15, 23, 42, 0.08);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Segoe UI", Arial, sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(37,99,235,.08), transparent 35%),
-        radial-gradient(circle at top right, rgba(99,102,241,.08), transparent 30%),
-        var(--bg);
+      font-family: "Heebo", "Segoe UI", Arial, sans-serif;
       color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(15,118,110,.12), transparent 26%),
+        radial-gradient(circle at top left, rgba(21,94,117,.10), transparent 24%),
+        linear-gradient(180deg, #ffffff 0%, var(--bg) 38%, #eef4f8 100%);
     }}
     .wrap {{
-      max-width: 1180px;
+      max-width: 1120px;
       margin: 0 auto;
-      padding: 32px 20px 56px;
+      padding: 30px 18px 54px;
+    }}
+    .hero, .card, .section, .empty-state {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
     }}
     .hero {{
-      background: linear-gradient(135deg, #eff6ff 0%, #f8fbff 55%, #ffffff 100%);
-      border: 1px solid #dbeafe;
       border-radius: 28px;
-      padding: 28px;
-      box-shadow: var(--shadow);
-      margin-bottom: 22px;
+      padding: 26px;
+      overflow: hidden;
+      position: relative;
+      margin-bottom: 18px;
+    }}
+    .hero::after {{
+      content: "";
+      position: absolute;
+      inset: auto -80px -100px auto;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15,118,110,.16), transparent 70%);
+      pointer-events: none;
     }}
     .eyebrow {{
+      color: var(--accent);
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: .08em;
-      color: #64748b;
       font-size: 12px;
-      font-weight: 700;
       margin-bottom: 10px;
     }}
     h1 {{
       margin: 0;
-      font-size: clamp(32px, 4vw, 46px);
-      line-height: 1.05;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.04;
     }}
     .lede {{
       margin: 12px 0 0;
       color: var(--muted);
-      font-size: 17px;
       max-width: 760px;
-      line-height: 1.65;
+      font-size: 17px;
+      line-height: 1.7;
     }}
-    .nav {{
+    .search {{
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
       margin-top: 18px;
     }}
-    .chip {{
-      text-decoration: none;
-      color: var(--blue);
-      border: 1px solid #bfd7ff;
-      background: white;
-      padding: 10px 14px;
-      border-radius: 999px;
-      font-weight: 700;
-      transition: .15s ease;
-    }}
-    .chip:hover {{
-      background: var(--blue-soft);
-      border-color: var(--blue);
-      transform: translateY(-1px);
-    }}
-    .chip.active {{
-      background: var(--blue);
-      color: white;
-      border-color: var(--blue);
-    }}
-    .hero-actions {{
-      margin-top: 16px;
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }}
-    .primary-link, .secondary-link {{
-      text-decoration: none;
-      border-radius: 14px;
-      padding: 12px 16px;
-      font-weight: 800;
-      display: inline-block;
-    }}
-    .primary-link {{
-      background: var(--blue);
-      color: white;
-      box-shadow: 0 10px 24px rgba(37,99,235,.22);
-    }}
-    .secondary-link {{
-      background: white;
-      color: var(--blue);
-      border: 1px solid #bfd7ff;
-    }}
-    .search-form {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 18px;
-    }}
-    .search-form input[type="text"] {{
+    .search input {{
       flex: 1;
       min-width: 280px;
+      border: 1px solid #cdd8e6;
+      border-radius: 18px;
       padding: 15px 16px;
-      border: 1px solid #cbd5e1;
-      border-radius: 16px;
       font-size: 16px;
+      outline: none;
       background: white;
     }}
-    .search-form button {{
+    .search button {{
       border: 0;
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 15px 18px;
-      background: var(--blue);
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       color: white;
       font-weight: 800;
       cursor: pointer;
+      box-shadow: 0 10px 24px rgba(15,118,110,.22);
     }}
-    .examples {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }}
-    .example-chip {{
-      text-decoration: none;
-      color: var(--blue-strong);
-      background: white;
-      border: 1px solid #dbeafe;
-      border-radius: 999px;
-      padding: 8px 12px;
+    .hint {{
+      margin-top: 12px;
+      color: var(--muted);
       font-size: 13px;
     }}
-    .panel, .subpanel, .metric, .card, .empty-state, .sample-item {{
-      background: var(--panel);
-      backdrop-filter: blur(10px);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-    }}
-    .panel {{
+    .section {{
       border-radius: 24px;
       padding: 22px;
-      margin-top: 16px;
     }}
     .section-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: end;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }}
-    .section-head h2, .section-head h3 {{
+    .section-head h2 {{
       margin: 0;
+      font-size: 22px;
     }}
     .section-head p {{
-      margin: 0;
+      margin: 6px 0 0;
       color: var(--muted);
     }}
-    .metrics-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 12px;
-    }}
-    .metric {{
-      border-radius: 18px;
-      padding: 18px 18px 16px;
-      min-height: 138px;
-      position: relative;
-      overflow: hidden;
-    }}
-    .metric::before {{
-      content: "";
-      position: absolute;
-      inset: 0 0 auto 0;
-      height: 5px;
-      background: var(--metric-accent, #2563eb);
-    }}
-    .metric::after {{
-      content: "";
-      position: absolute;
-      right: -24px;
-      top: -24px;
-      width: 86px;
-      height: 86px;
-      border-radius: 999px;
-      background: var(--metric-glow, rgba(37,99,235,.08));
-      pointer-events: none;
-    }}
-    .metric-blue {{
-      --metric-accent: #2563eb;
-      --metric-glow: rgba(37,99,235,.10);
-    }}
-    .metric-indigo {{
-      --metric-accent: #4f46e5;
-      --metric-glow: rgba(79,70,229,.10);
-    }}
-    .metric-emerald {{
-      --metric-accent: #059669;
-      --metric-glow: rgba(5,150,105,.10);
-    }}
-    .metric-amber {{
-      --metric-accent: #d97706;
-      --metric-glow: rgba(217,119,6,.10);
-    }}
-    .metric-label {{
-      color: #64748b;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      line-height: 1.35;
-      max-width: 14ch;
-    }}
-    .metric-value {{
-      font-size: clamp(28px, 3vw, 36px);
-      font-weight: 900;
-      margin-top: 12px;
-      line-height: 1;
-      letter-spacing: -0.04em;
-      word-break: break-word;
-    }}
-    .metric-note {{
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
-      max-width: 28ch;
-    }}
-    .split-grid {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }}
-    .stacked-panels {{
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }}
-    .subpanel {{
-      border-radius: 18px;
-      padding: 16px;
-    }}
-    .table-wrap {{
-      overflow-x: auto;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 720px;
-      background: transparent;
-    }}
-    th, td {{
-      text-align: right;
-      padding: 11px 12px;
-      border-bottom: 1px solid #e2e8f0;
-      vertical-align: top;
-      white-space: nowrap;
-    }}
-    th {{
-      background: #f8fafc;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }}
-    .results-grid {{
+    .results {{
       display: grid;
       gap: 14px;
     }}
     .card {{
-      border-radius: 20px;
+      border-radius: 22px;
       padding: 18px;
     }}
     .card-top {{
       display: flex;
       justify-content: space-between;
-      gap: 12px;
       align-items: start;
+      gap: 12px;
     }}
-    .card-kicker {{
-      color: #64748b;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }}
-    .card h3 {{
-      margin: 6px 0 0;
-      font-size: 22px;
-    }}
-    .score-pill {{
-      background: var(--blue-soft);
-      color: var(--blue-strong);
-      border: 1px solid #bfd7ff;
-      border-radius: 999px;
-      padding: 8px 14px;
-      font-weight: 800;
-      white-space: nowrap;
-    }}
-    .card-meta {{
-      margin-top: 10px;
-      color: #334155;
-      font-weight: 700;
-    }}
-    .card-desc {{
-      margin: 10px 0 0;
-      color: var(--muted);
-      line-height: 1.65;
-    }}
-    .insight-panel {{
-      margin-top: 12px;
-      display: grid;
-      gap: 10px;
-    }}
-    .insight-box {{
-      border-radius: 16px;
-      padding: 12px 14px;
-      border: 1px solid #dbeafe;
-      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-    }}
-    .insight-title {{
+    .rank {{
+      color: var(--accent);
       font-size: 12px;
       font-weight: 900;
-      color: #1d4ed8;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }}
+    h3 {{
+      margin: 6px 0 0;
+      font-size: 24px;
+    }}
+    .score {{
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid #bff3ef;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-weight: 900;
+      white-space: nowrap;
+    }}
+    .meta {{
+      margin-top: 10px;
+      font-weight: 700;
+      color: #334155;
+    }}
+    .explanation {{
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid #dcecf1;
+      background: #f7fbfd;
+      color: #334155;
+      line-height: 1.7;
+    }}
+    .insight {{
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }}
+    .card-actions {{
+      margin-top: 14px;
+    }}
+    .calc-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 11px 14px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: white;
+      font: inherit;
+      font-weight: 800;
+      border: 0;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 10px 24px rgba(15,118,110,.18);
+    }}
+    .panel-mini {{
+      border-radius: 18px;
+      padding: 14px;
+      border: 1px solid #dcecf1;
+      background: linear-gradient(180deg, #fff 0%, #f8fbfd 100%);
+    }}
+    details.panel-mini {{
+      cursor: default;
+    }}
+    details.panel-mini > summary {{
+      list-style: none;
+    }}
+    details.panel-mini > summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .mini-title {{
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--accent);
       text-transform: uppercase;
       letter-spacing: .08em;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }}
-    .insight-chips {{
+    .chips {{
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
     }}
-    .insight-chip {{
+    .chip {{
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 7px 10px;
       border-radius: 999px;
-      background: #eff6ff;
-      color: #1e40af;
+      padding: 7px 10px;
+      background: #eefbf9;
+      color: #115e59;
+      border: 1px solid #c6f0e8;
       font-size: 12px;
       font-weight: 700;
-      border: 1px solid #bfdbfe;
     }}
     .source-link {{
+      display: inline-block;
       color: #0f172a;
-      font-weight: 800;
       text-decoration: none;
+      font-weight: 900;
     }}
     .source-link:hover {{
       text-decoration: underline;
     }}
-    .source-summary {{
+    .source-body {{
       margin-top: 8px;
       color: var(--muted);
-      line-height: 1.55;
+      line-height: 1.65;
       font-size: 13px;
     }}
     .empty-state {{
       border-radius: 18px;
-      padding: 20px;
+      padding: 18px;
       color: var(--muted);
     }}
-    .sample-list {{
+    .valuation-form {{
       display: grid;
       gap: 12px;
     }}
-    .sample-item {{
-      border-radius: 18px;
-      padding: 16px;
+      .valuation-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }}
+      .valuation-grid input {{
+        border: 1px solid #cdd8e6;
+        border-radius: 14px;
+        padding: 12px 14px;
+        font: inherit;
+        background: white;
+      }}
+      .valuation-grid select {{
+        border: 1px solid #cdd8e6;
+        border-radius: 14px;
+        padding: 12px 14px;
+        font: inherit;
+        background: white;
+      }}
+    .valuation-form button {{
+      width: fit-content;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 18px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: white;
+      font-weight: 800;
+      cursor: pointer;
     }}
-    .sample-item strong {{
-      display: block;
-      margin-bottom: 6px;
-    }}
-    .sample-item span, .sample-item em {{
+    .valuation-help {{
+      margin-top: 8px;
       color: var(--muted);
-      font-style: normal;
-      display: block;
-      margin-top: 2px;
+      font-size: 13px;
     }}
-    .sample-item p {{
-      margin: 10px 0 0;
+    .valuation-result {{
+      margin-top: 16px;
+      border-radius: 20px;
+      padding: 18px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
+      border: 1px solid #dcecf1;
+    }}
+    .valuation-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }}
+    .valuation-kicker {{
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }}
+    .valuation-score {{
+      border-radius: 999px;
+      border: 1px solid #bfebdf;
+      background: #ecfdf5;
+      color: #166534;
+      font-weight: 900;
+      padding: 8px 12px;
+    }}
+    .valuation-range {{
+      margin-top: 10px;
+      color: #0f766e;
+      font-size: 15px;
+      font-weight: 800;
+    }}
+    .valuation-price {{
+      margin-top: 4px;
+      font-size: clamp(26px, 3.8vw, 38px);
+      font-weight: 900;
+      letter-spacing: -0.04em;
+    }}
+    .valuation-note {{
+      margin-top: 6px;
+      color: var(--muted);
+    }}
+    .valuation-reasons {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }}
+    .valuation-chip {{
+      border-radius: 999px;
+      background: #eefbf9;
+      border: 1px solid #c6f0e8;
+      color: #115e59;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .valuation-preview {{
+      margin-top: 14px;
+      display: grid;
+      gap: 8px;
+    }}
+    .valuation-preview-item {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid #e2e8f0;
+      background: white;
       color: #334155;
-      line-height: 1.65;
     }}
-    @media (max-width: 900px) {{
-      .metrics-grid, .split-grid {{
-        grid-template-columns: 1fr 1fr;
-      }}
-      .stacked-panels {{
-        grid-template-columns: 1fr;
-      }}
+    .valuation-hist {{
+      margin-top: 16px;
+    }}
+    .histogram {{
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }}
+    .hist-row {{
+      display: grid;
+      grid-template-columns: minmax(110px, 180px) 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }}
+    .hist-label {{
+      font-size: 12px;
+      color: var(--muted);
+    }}
+    .hist-track {{
+      position: relative;
+      height: 12px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }}
+    .hist-fill {{
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }}
+    .hist-count {{
+      font-size: 12px;
+      font-weight: 800;
+      color: #0f172a;
     }}
     @media (max-width: 640px) {{
-      .wrap {{
-        padding: 16px 12px 40px;
-      }}
-      .hero, .panel {{
-        padding: 18px;
-        border-radius: 20px;
-      }}
-      .metrics-grid, .split-grid, .stacked-panels {{
-        grid-template-columns: 1fr;
-      }}
-      .card-top {{
-        flex-direction: column;
-      }}
+      .wrap {{ padding: 16px 12px 40px; }}
+      .hero, .section, .card {{ border-radius: 20px; }}
+      .card-top {{ flex-direction: column; }}
+      h3 {{ font-size: 22px; }}
+      .valuation-grid {{ grid-template-columns: 1fr 1fr; }}
+      .hist-row {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
 <body>
   <div class="wrap">
-    {body_inner}
+    <section class="hero">
+      <div class="eyebrow">Car Search Agent</div>
+      <h1>חיפוש רכבים בעברית, עם הסבר ומקור רשמי לכל תוצאה</h1>
+      <p class="lede">הקלד שאילתה חופשית, לדוגמה: רכב קטן לעיר, חסכוני, אוטומטי. המערכת תציג תוצאות עם הסבר למה הן מתאימות, למה הן דומות, וקישור לעמוד הרשמי של הדגם כשיש לנו אותו.</p>
+      <form class="search" method="get" action="/">
+        <input type="hidden" name="page" value="search" />
+        <input type="text" name="q" value="{html.escape(query)}" placeholder="למשל: רכב טוב בחיפה" />
+        <button type="submit">חפש</button>
+      </form>
+      <div class="hint">אין כאן דוגמאות מוכנות. כל חיפוש נבנה מתוך השאילתה שלך בלבד.</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>תוצאות</h2>
+        <p>{html.escape(query) if query else 'כתוב שאילתה כדי לראות תוצאות.'}</p>
+      </div>
+      <div class="results">{result_cards}</div>
+    </section>
+
+    {_render_valuation_block(params)}
   </div>
+  <script>
+    (() => {{
+        const valuationSection = document.getElementById('valuation');
+        const valuationForm = document.getElementById('valuation-form');
+      const fields = {{
+        make: document.getElementById('calc_make'),
+        model: document.getElementById('calc_model'),
+        year: document.getElementById('calc_year'),
+        km: document.getElementById('calc_km'),
+        gear: document.getElementById('calc_gear'),
+        fuel: document.getElementById('calc_fuel'),
+        owners: document.getElementById('calc_owners'),
+        location: document.getElementById('calc_location'),
+        condition: document.getElementById('calc_condition'),
+      }};
+      document.querySelectorAll('.calc-link').forEach((button) => {{
+        button.addEventListener('click', () => {{
+          if (fields.make) fields.make.value = button.dataset.calcMake || '';
+          if (fields.model) fields.model.value = button.dataset.calcModel || '';
+          if (fields.year) fields.year.value = button.dataset.calcYear || '';
+          if (fields.km) fields.km.value = button.dataset.calcKm || '';
+          if (fields.gear) fields.gear.value = button.dataset.calcGear || '';
+          if (fields.fuel) fields.fuel.value = button.dataset.calcFuel || '';
+          if (fields.owners) fields.owners.value = button.dataset.calcOwners || '';
+          if (fields.location) fields.location.value = button.dataset.calcLocation || '';
+          if (fields.condition) fields.condition.value = '';
+          if (valuationSection) {{
+            valuationSection.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+          }}
+          if (valuationForm && typeof valuationForm.requestSubmit === 'function') {{
+            valuationForm.requestSubmit();
+          }} else if (valuationForm) {{
+            valuationForm.submit();
+          }}
+        }});
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -769,19 +724,39 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
-        page = params.get("page", ["overview"])[0].strip() or "overview"
         query = params.get("q", [""])[0].strip()
-
         results = []
-        if page == "search" and query:
+        if query:
             _, results = _smart_search(query)
-
-        body = _render_page(page, query, results, params).encode("utf-8")
+        body = _render_page(query, results, params).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(content_length).decode("utf-8", errors="replace")
+            params = urllib.parse.parse_qs(raw_body)
+            query = params.get("q", [""])[0].strip()
+            results = []
+            if query:
+                _, results = _smart_search(query)
+            body = _render_page(query, results, params).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            error_body = f"<pre>POST failed: {html.escape(repr(exc))}</pre>".encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(error_body)))
+            self.end_headers()
+            self.wfile.write(error_body)
 
     def log_message(self, format, *args):
         return

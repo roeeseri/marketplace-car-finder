@@ -19,9 +19,11 @@ KNOWLEDGE_PATH = BASE_DIR / "data" / "knowledge" / "vehicle_sources.json"
 @dataclass(frozen=True)
 class MakeSource:
     make: str
+    model: Optional[str]
     source_name: str
     source_url: str
     summary: str
+    excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -44,19 +46,80 @@ def _normalize(value: str | None) -> str:
     return str(value).strip().lower() if value else ""
 
 
-def get_make_source(make: str | None) -> Optional[MakeSource]:
-    normalized = _normalize(make)
-    if not normalized:
+def _normalize_model(value: str | None) -> str:
+    return _normalize(value).replace(" ", "")
+
+
+def _model_candidates(make: str, model: str | None) -> list[str]:
+    nm = _normalize_model(model)
+    mk = _normalize(make)
+    candidates = [nm] if nm else []
+
+    if mk in {"ב.מ.וו", "bmw"} and nm:
+        if nm.startswith(("320", "330", "318", "316", "325", "328", "335", "340")):
+            candidates.append("3")
+        if nm.startswith("x1"):
+            candidates.append("x1")
+    elif mk in {"יונדאי", "hyundai"} and nm:
+        if nm.startswith("i20"):
+            candidates.append("i20")
+        if nm.startswith("i10"):
+            candidates.append("i10")
+    elif mk in {"טויוטה", "toyota"} and nm:
+        if "auris" in nm:
+            candidates.append("auris")
+        if "yaris" in nm:
+            candidates.append("yaris")
+    elif mk in {"סוזוקי", "suzuki"} and nm:
+        if "swift" in nm:
+            candidates.append("swift")
+    elif mk in {"מאזדה", "mazda"} and nm:
+        if nm.startswith("2"):
+            candidates.append("2")
+    elif mk in {"ניסאן", "nissan"} and nm:
+        if "micra" in nm:
+            candidates.append("micra")
+    elif mk in {"וולוו", "volvo"} and nm:
+        if "xc40" in nm:
+            candidates.append("xc40")
+    elif mk in {"קיה", "kia"} and nm:
+        if "picanto" in nm:
+            candidates.append("picanto")
+
+    return [item for idx, item in enumerate(candidates) if item and item not in candidates[:idx]]
+
+
+def get_make_source(make: str | None, model: str | None = None) -> Optional[MakeSource]:
+    normalized_make = _normalize(make)
+    normalized_model = _normalize_model(model)
+    if not normalized_make:
         return None
 
     db = _load_source_db()
-    for row in db.get("sources", []):
-        if _normalize(row.get("make")) == normalized:
+    candidates = _model_candidates(make, model)
+    for bucket in ("sources", "makes"):
+        for row in db.get(bucket, []):
+            if _normalize(row.get("make")) != normalized_make:
+                continue
+            row_model = _normalize_model(row.get("model"))
+            if row_model and any(row_model == candidate for candidate in candidates):
+                return MakeSource(
+                    make=row.get("make", ""),
+                    model=row.get("model"),
+                    source_name=row.get("source_name", ""),
+                    source_url=row.get("source_url", ""),
+                    summary=row.get("summary", ""),
+                    excerpt=row.get("excerpt"),
+                )
+    for row in db.get("makes", []):
+        if _normalize(row.get("make")) == normalized_make:
             return MakeSource(
                 make=row.get("make", ""),
+                model=row.get("model"),
                 source_name=row.get("source_name", ""),
                 source_url=row.get("source_url", ""),
                 summary=row.get("summary", ""),
+                excerpt=row.get("excerpt"),
             )
     return None
 
@@ -202,5 +265,5 @@ def build_insight_bundle(ad: CarAd, query: ParsedQuery, result: RankedResult) ->
         class_label=vehicle_class,
         class_reason=class_reason,
         similarity_reasons=build_similarity_reasons(ad, query, result),
-        source=get_make_source(ad.make),
+        source=get_make_source(ad.make, ad.model),
     )
