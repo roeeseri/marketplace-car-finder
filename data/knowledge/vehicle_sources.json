@@ -1,0 +1,124 @@
+{
+  "sources": [
+    {
+      "make": "ב.מ.וו",
+      "source_name": "BMW all models",
+      "source_url": "https://www.bmw.pl/pl/all-models.html",
+      "summary": "העמוד הרשמי של BMW להצגת כלל הדגמים, סינון לפי קטגוריה וסוג הנעה, והיכרות עם מגוון הטכנולוגיות של היצרן."
+    },
+    {
+      "make": "מרצדס",
+      "source_name": "Mercedes-Benz",
+      "source_url": "https://www.mercedes-benz.com",
+      "summary": "האתר הרשמי של מרצדס-בנץ, המשמש כמקור מותג ודגמים של היצרן."
+    },
+    {
+      "make": "אודי",
+      "source_name": "Audi",
+      "source_url": "https://www.audi.com",
+      "summary": "האתר הרשמי של אודי להצגת קו הדגמים והמותג."
+    },
+    {
+      "make": "וולוו",
+      "source_name": "Volvo Cars",
+      "source_url": "https://www.volvocars.com",
+      "summary": "האתר הרשמי של וולוו להצגת הדגמים, בטיחות והמותג."
+    },
+    {
+      "make": "לקסוס",
+      "source_name": "Lexus",
+      "source_url": "https://www.lexus.com",
+      "summary": "האתר הרשמי של לקסוס להיכרות עם דגמי היוקרה של היצרן."
+    },
+    {
+      "make": "טויוטה",
+      "source_name": "Toyota",
+      "source_url": "https://www.toyota.com",
+      "summary": "האתר הרשמי של טויוטה, המשמש כמקור מותג ודגמים."
+    },
+    {
+      "make": "יונדאי",
+      "source_name": "Hyundai",
+      "source_url": "https://www.hyundai.com",
+      "summary": "האתר הרשמי של יונדאי להצגת דגמים, טכנולוגיות ומידע על היצרן."
+    },
+    {
+      "make": "קיה",
+      "source_name": "Kia",
+      "source_url": "https://www.kia.com",
+      "summary": "האתר הרשמי של קיה להצגת קו הדגמים והמותג."
+    },
+    {
+      "make": "מאזדה",
+      "source_name": "Mazda",
+      "source_url": "https://www.mazdausa.com",
+      "summary": "האתר הרשמי של מאזדה להצגת דגמי היצרן ומידע כללי על המותג."
+    },
+    {
+      "make": "סוזוקי",
+      "source_name": "Suzuki",
+      "source_url": "https://www.suzuki.co.uk",
+      "summary": "האתר הרשמי של סוזוקי להיכרות עם דגמי היצרן."
+    },
+    {
+      "make": "ניסאן",
+      "source_name": "Nissan",
+      "source_url": "https://www.nissanusa.com",
+      "summary": "האתר הרשמי של ניסאן להצגת הדגמים ומידע על המותג."
+    },
+    {
+      "make": "פורד",
+      "source_name": "Ford",
+      "source_url": "https://www.ford.com",
+      "summary": "האתר הרשמי של פורד להצגת הדגמים והמותג."
+    },
+    {
+      "make": "סקודה",
+      "source_name": "Škoda",
+      "source_url": "https://www.skoda-auto.com",
+      "summary": "האתר הרשמי של סקודה להצגת דגמים, טכנולוגיות ומידע על היצרן."
+    },
+    {
+      "make": "פולקסווגן",
+      "source_name": "Volkswagen",
+      "source_url": "https://www.volkswagen.com",
+      "summary": "האתר הרשמי של פולקסווגן להצגת קו הדגמים של היצרן."
+    },
+    {
+      "make": "רנו",
+      "source_name": "Renault",
+      "source_url": "https://www.renault.com",
+      "summary": "האתר הרשמי של רנו להצגת הדגמים והמותג."
+    },
+    {
+      "make": "הונדה",
+      "source_name": "Honda",
+      "source_url": "https://www.honda.com",
+      "summary": "האתר הרשמי של הונדה להצגת דגמים ומידע על המותג."
+    },
+    {
+      "make": "פיאט",
+      "source_name": "FIAT",
+      "source_url": "https://www.fiat.com",
+      "summary": "האתר הרשמי של פיאט להצגת דגמי היצרן."
+    },
+    {
+      "make": "סיטרואן",
+      "source_name": "Citroën",
+      "source_url": "https://www.citroen.com",
+      "summary": "האתר הרשמי של סיטרואן להצגת דגמי היצרן והמותג."
+    },
+    {
+      "make": "אופל",
+      "source_name": "Opel",
+      "source_url": "https://www.opel.com",
+      "summary": "האתר הרשמי של אופל להצגת דגמי היצרן."
+    },
+    {
+      "make": "שברולט",
+      "source_name": "Chevrolet",
+      "source_url": "https://www.chevrolet.com",
+      "summary": "האתר הרשמי של שברולט להצגת דגמי היצרן והמותג."
+    }
+  ]
+}

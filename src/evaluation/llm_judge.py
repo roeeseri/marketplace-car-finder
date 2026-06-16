@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict
 
 from src.data.schema import CarAd
+from src.location_groups import location_matches
 from src.nlu.query_parser import ParsedQuery
 
 
@@ -46,7 +47,7 @@ def judge_relevance(query: ParsedQuery, ad: CarAd) -> JudgeResult:
         return JudgeResult(0, "gear mismatch")
     if hard.fuel_type and ad.fuel_type and hard.fuel_type.lower() != ad.fuel_type.lower():
         return JudgeResult(0, "fuel mismatch")
-    if hard.location and ad.location and hard.location.lower() != ad.location.lower():
+    if hard.location and not location_matches(hard.location, ad.location):
         return JudgeResult(0, "location mismatch")
     if hard.owners_max is not None and ad.previous_owners is not None and ad.previous_owners > hard.owners_max:
         return JudgeResult(0, "too many owners")

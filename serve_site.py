@@ -12,6 +12,7 @@ from src.data.preprocessor import preprocess_all
 from src.data.validator import validate_all
 from src.evaluation.report import build_full_report
 from src.explanation.explainer import explain
+from src.knowledge.vehicle_insights import build_insight_bundle
 from src.nlu.query_parser import parse_query
 from src.ranking.ranker import RankingWeights, rank
 from src.search.embedder import Embedder
@@ -67,7 +68,10 @@ def _smart_search(query: str, top_n: int = 10):
     if not filtered:
         return parsed, []
     ranked = rank(filtered, parsed, RankingWeights())[:top_n]
-    pairs = [(result, explain(result.ad, parsed, result)) for result in ranked]
+    pairs = [
+        (result, explain(result.ad, parsed, result), build_insight_bundle(result.ad, parsed, result))
+        for result in ranked
+    ]
     return parsed, pairs
 
 
@@ -221,8 +225,23 @@ def _render_overview(report) -> str:
 def _render_search(query: str, results) -> str:
     result_cards = ""
     if results:
-        for i, (result, expl) in enumerate(results, 1):
+        for i, (result, expl, insight) in enumerate(results, 1):
             ad = result.ad
+            chips_html = "".join(
+                f'<span class="insight-chip">{html.escape(item)}</span>'
+                for item in insight.similarity_reasons
+            )
+            source_html = ""
+            if insight.source and insight.source.source_url:
+                source_html = f"""
+                <div class="insight-box">
+                  <div class="insight-title">מקור רשמי</div>
+                  <a class="source-link" href="{html.escape(insight.source.source_url)}" target="_blank" rel="noreferrer">
+                    {html.escape(insight.source.source_name)}
+                  </a>
+                  <div class="source-summary">{html.escape(insight.source.summary)}</div>
+                </div>
+                """
             result_cards += f"""
             <article class="card">
               <div class="card-top">
@@ -234,6 +253,13 @@ def _render_search(query: str, results) -> str:
               </div>
               <div class="card-meta">{int(ad.price):,} ₪ | {int(ad.km):,} km | {html.escape(ad.gear_type or '')} | {html.escape(ad.location or '')}</div>
               <p class="card-desc">{html.escape(expl)}</p>
+              <div class="insight-panel">
+                <div class="insight-box">
+                  <div class="insight-title">למה זה דומה?</div>
+                  <div class="insight-chips">{chips_html}</div>
+                </div>
+                {source_html}
+              </div>
             </article>
             """
     else:
@@ -627,6 +653,56 @@ def _render_page(page: str, query: str = "", results=None, params=None):
       margin: 10px 0 0;
       color: var(--muted);
       line-height: 1.65;
+    }}
+    .insight-panel {{
+      margin-top: 12px;
+      display: grid;
+      gap: 10px;
+    }}
+    .insight-box {{
+      border-radius: 16px;
+      padding: 12px 14px;
+      border: 1px solid #dbeafe;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }}
+    .insight-title {{
+      font-size: 12px;
+      font-weight: 900;
+      color: #1d4ed8;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 8px;
+    }}
+    .insight-chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .insight-chip {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1e40af;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid #bfdbfe;
+    }}
+    .source-link {{
+      color: #0f172a;
+      font-weight: 800;
+      text-decoration: none;
+    }}
+    .source-link:hover {{
+      text-decoration: underline;
+    }}
+    .source-summary {{
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 13px;
     }}
     .empty-state {{
       border-radius: 18px;

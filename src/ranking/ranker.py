@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 from config import MIN_YEAR, MAX_YEAR
 from src.data.schema import CarAd, CarFeatures
+from src.location_groups import REGION_CITY_MAP, canonical_location, location_region
 from src.nlu.query_parser import ParsedQuery
 
 _MAX_KM     = 250_000
@@ -23,6 +24,7 @@ class RankedResult:
     semantic_score:        float
     vehicle_quality_score: float
     feature_match_score:   float
+    location_match_score:  float
 
 
 def rank(
@@ -45,13 +47,15 @@ def _score(
 ) -> RankedResult:
     vq    = _vehicle_quality_score(ad)
     fm    = _feature_match_score(ad.features, query.soft_preferences)
-    total = w.semantic * semantic_score + w.vehicle_quality * vq + w.feature_match * fm
+    lm    = _location_match_score(query.hard_constraints.location, ad.location)
+    total = w.semantic * semantic_score + w.vehicle_quality * vq + w.feature_match * fm + 0.15 * lm
     return RankedResult(
         ad=ad,
         total_score=round(total, 4),
         semantic_score=round(semantic_score, 4),
         vehicle_quality_score=round(vq, 4),
         feature_match_score=round(fm, 4),
+        location_match_score=round(lm, 4),
     )
 
 
@@ -77,3 +81,17 @@ def _feature_match_score(features: CarFeatures, prefs) -> float:
         return 0.5
     matched = sum(1 for k in requested if mapping.get(k) is True)
     return matched / len(requested)
+
+
+def _location_match_score(query_location: str | None, ad_location: str | None) -> float:
+    q = canonical_location(query_location)
+    a = canonical_location(ad_location)
+    if not q or not a:
+        return 0.0
+    q_region = location_region(q)
+    a_region = location_region(a)
+    if q == a:
+        return 2.0 if q_region and q_region not in {q} else 1.5
+    if q_region and a_region and q_region == a_region:
+        return 0.5 if q not in REGION_CITY_MAP else 0.8
+    return 0.0

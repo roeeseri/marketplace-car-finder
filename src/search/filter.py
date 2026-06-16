@@ -1,6 +1,7 @@
 from typing import List
 
 from src.data.schema import CarAd
+from src.location_groups import location_matches
 from src.nlu.query_parser import HardConstraints
 
 
@@ -27,6 +28,9 @@ def _matches(ad: CarAd, c: HardConstraints) -> bool:
         return False
     if c.fuel_type and ad.fuel_type and c.fuel_type.lower() != ad.fuel_type.lower():
         return False
+    if c.location:
+        if not ad.location or not location_matches(c.location, ad.location):
+            return False
     if c.owners_max is not None and ad.previous_owners is not None:
         if ad.previous_owners > c.owners_max:
             return False

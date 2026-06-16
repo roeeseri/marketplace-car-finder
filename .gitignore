@@ -27,3 +27,4 @@ data/processed/
 Thumbs.db
 
 .streamlit/credentials.toml
+.vs/

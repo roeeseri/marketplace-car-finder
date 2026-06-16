@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from src.location_groups import canonical_location, extract_location
+
 # ── Known makes (Hebrew variants + English → canonical Hebrew) ────────────────
 
 _MAKES = {
@@ -175,10 +177,7 @@ def _extract_fuel_type(text: str) -> Optional[str]:
 
 
 def _extract_location(text: str) -> Optional[str]:
-    for loc in sorted(_LOCATIONS, key=len, reverse=True):
-        if loc in text:
-            return loc
-    return None
+    return extract_location(text)
 
 
 def _extract_owners_max(text: str) -> Optional[int]:
