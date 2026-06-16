@@ -37,8 +37,8 @@ This document summarizes the current evaluation outputs computed by the codebase
 
 | Variant | Mean ms | Median ms | Peak KB |
 |---|---:|---:|---:|
-| smart | 37.21 | 33.37 | 127.1 |
-| baseline | 2.91 | 2.63 | 9.9 |
+| smart | 29.28 | 23.57 | 127.1 |
+| baseline | 2.20 | 1.79 | 9.9 |
 
 ## Judge sample
 
