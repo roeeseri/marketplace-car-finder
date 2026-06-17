@@ -89,6 +89,42 @@ BENCHMARK_CASES: List[EvaluationCase] = [
         expected_soft_preferences=["luxury"],
         relevance={"313": 3, "359": 3, "405": 3, "448": 3, "463": 3, "419": 2, "435": 2},
     ),
+    EvaluationCase(
+        query="רכב קטן וחסכוני בחיפה עד 60 אלף",
+        expected_constraints={"price_max": 60000, "location": "חיפה"},
+        expected_soft_preferences=["fuel_efficient", "city_driving"],
+        relevance={"2": 3, "38": 2, "78": 2, "96": 3, "107": 2, "164": 3, "175": 2, "178": 3},
+    ),
+    EvaluationCase(
+        query="משפחתית בנהריה עד 70 אלף",
+        expected_constraints={"price_max": 70000, "location": "נהריה"},
+        expected_soft_preferences=["family_car"],
+        relevance={"14": 2, "18": 3, "19": 3, "34": 3, "56": 2, "105": 3, "128": 2, "138": 1, "142": 2},
+    ),
+    EvaluationCase(
+        query="רכב יוקרתי בקריות",
+        expected_constraints={"location": "קריות"},
+        expected_soft_preferences=["luxury"],
+        relevance={"311": 3, "359": 3, "418": 2, "419": 2, "420": 3, "457": 3},
+    ),
+    EvaluationCase(
+        query="רכב יד ראשונה בתל אביב עד 50 אלף",
+        expected_constraints={"price_max": 50000, "location": "תל אביב", "owners_max": 1},
+        expected_soft_preferences=["first_owner", "city_driving"],
+        relevance={"1": 3, "32": 3, "62": 2, "71": 2, "122": 2, "145": 1},
+    ),
+    EvaluationCase(
+        query="רכב קטן וחסכוני למודיעין",
+        expected_constraints={"location": "מודיעין"},
+        expected_soft_preferences=["fuel_efficient", "city_driving", "young_driver"],
+        relevance={"6": 3, "26": 2, "59": 3, "70": 2, "74": 2, "75": 2, "90": 2, "135": 1, "151": 1},
+    ),
+    EvaluationCase(
+        query="רכב היברידי יוקרתי",
+        expected_constraints={},
+        expected_soft_preferences=["luxury"],
+        relevance={"335": 3, "379": 3, "383": 2, "387": 2, "399": 2, "400": 3, "474": 2, "500": 3},
+    ),
 ]
 
 

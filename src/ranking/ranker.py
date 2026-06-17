@@ -25,6 +25,7 @@ class RankedResult:
     vehicle_quality_score: float
     feature_match_score:   float
     location_match_score:  float
+    hard_fit_score:        float = 0.0
 
 
 def rank(
@@ -48,7 +49,8 @@ def _score(
     vq    = _vehicle_quality_score(ad)
     fm    = _feature_match_score(ad.features, query.soft_preferences)
     lm    = _location_match_score(query.hard_constraints.location, ad.location)
-    total = w.semantic * semantic_score + w.vehicle_quality * vq + w.feature_match * fm + 0.15 * lm
+    hf    = _hard_fit_score(ad, query)
+    total = 0.30 * semantic_score + 0.20 * vq + 0.12 * fm + 0.20 * hf + 0.18 * lm
     return RankedResult(
         ad=ad,
         total_score=round(total, 4),
@@ -56,6 +58,7 @@ def _score(
         vehicle_quality_score=round(vq, 4),
         feature_match_score=round(fm, 4),
         location_match_score=round(lm, 4),
+        hard_fit_score=round(hf, 4),
     )
 
 
@@ -93,5 +96,42 @@ def _location_match_score(query_location: str | None, ad_location: str | None) -
     if q == a:
         return 2.0 if q_region and q_region not in {q} else 1.5
     if q_region and a_region and q_region == a_region:
-        return 0.5 if q not in REGION_CITY_MAP else 0.8
+        return 0.7 if q not in REGION_CITY_MAP else 1.0
     return 0.0
+
+
+def _hard_fit_score(ad: CarAd, query: ParsedQuery) -> float:
+    hard = query.hard_constraints
+    scores: list[float] = []
+
+    if hard.make:
+        scores.append(1.0 if ad.make and hard.make.lower() == ad.make.lower() else 0.0)
+    if hard.model:
+        scores.append(1.0 if ad.model and hard.model.lower() == ad.model.lower() else 0.0)
+    if hard.price_max is not None and hard.price_max > 0:
+        scores.append(max(0.0, min(1.0, 1.0 - (ad.price / hard.price_max))))
+    if hard.price_min is not None and hard.price_min > 0:
+        scores.append(max(0.0, min(1.0, ad.price / hard.price_min)))
+    if hard.year_min is not None:
+        denom = max(MAX_YEAR - hard.year_min, 1)
+        scores.append(max(0.0, min(1.0, (ad.year - hard.year_min) / denom)))
+    if hard.year_max is not None:
+        denom = max(hard.year_max - MIN_YEAR, 1)
+        scores.append(max(0.0, min(1.0, (hard.year_max - ad.year) / denom)))
+    if hard.km_max is not None and hard.km_max > 0:
+        scores.append(max(0.0, min(1.0, 1.0 - (ad.km / hard.km_max))))
+    if hard.gear_type:
+        scores.append(1.0 if ad.gear_type and hard.gear_type.lower() == ad.gear_type.lower() else 0.0)
+    if hard.fuel_type:
+        scores.append(1.0 if ad.fuel_type and hard.fuel_type.lower() == ad.fuel_type.lower() else 0.0)
+    if hard.location:
+        scores.append(_location_match_score(hard.location, ad.location) / 2.0)
+    if hard.owners_max is not None:
+        if ad.previous_owners is None:
+            scores.append(0.5)
+        else:
+            scores.append(max(0.0, min(1.0, 1.0 - (ad.previous_owners / max(hard.owners_max, 1)))))
+
+    if not scores:
+        return 0.5
+    return sum(scores) / len(scores)

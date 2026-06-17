@@ -16,6 +16,7 @@ from src.ranking.ranker import RankingWeights, rank
 from src.search.embedder import Embedder
 from src.search.filter import filter_ads
 from src.search.index_builder import build_and_save
+from src.search.router import route_search
 from src.search.semantic_search import load_semantic_search
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -554,18 +555,8 @@ def _is_admin_mode() -> bool:
 
 def run_search(query: str):
     valid_ads, searcher, _ = _get_pipeline()
-    parsed = parse_query(query)
-    hits = searcher.search(parsed.semantic_query, k=len(valid_ads))
-    ad_map = {ad.ad_id: ad for ad in valid_ads}
-    candidates = [(ad_map[h.ad_id], h.score) for h in hits if h.ad_id in ad_map]
-    candidate_ads = [ad for ad, _ in candidates]
-    filtered_ids = {a.ad_id for a in filter_ads(candidate_ads, parsed.hard_constraints)}
-    filtered = [(ad, score) for ad, score in candidates if ad.ad_id in filtered_ids]
-    if not filtered:
-        return parsed, []
-    ranked = rank(filtered, parsed, RankingWeights())[:TOP_N]
-    pairs = [(r, explain(r.ad, parsed, r)) for r in ranked]
-    return parsed, pairs
+    parsed, pairs, decision = route_search(query, valid_ads, searcher, top_n=TOP_N, strategy="auto")
+    return parsed, pairs, decision
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -743,8 +734,21 @@ def _render_search_area():
     return st.button("🔍 חפש", type="primary")
 
 
-def _render_results(parsed, pairs, last_query):
+def _render_results(parsed, pairs, last_query, decision):
     count = len(pairs)
+    fallback_note = ""
+    if getattr(decision, "fallback_from", None):
+        fallback_note = f"<div class='strategy-fallback'>Fallback מ-{decision.fallback_from}: {decision.fallback_reason}</div>"
+    st.markdown(
+        f"""
+        <div style="margin:0 0 14px;padding:14px 16px;border-radius:16px;border:1px solid #cfe2ff;background:linear-gradient(180deg,#f8fbff 0%,#eef5ff 100%);direction:rtl;text-align:right">
+          <div style="font-weight:900;color:#1d4ed8">נבחר מנוע: <b>{decision.strategy.capitalize()}</b></div>
+          <div style="margin-top:6px;color:#334155">{decision.reason}</div>
+          {fallback_note}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f'<div class="results-header">'
         f'נמצאו <b>{count} תוצאות</b> עבור: <i>"{last_query}"</i>'
@@ -889,8 +893,15 @@ def main():
         else:
             with st.spinner("מחפש…"):
                 try:
-                    parsed, pairs = run_search(q)
-                    st.session_state["search_results"] = (parsed, pairs, q)
+                    valid_ads, searcher, _ = _get_pipeline()
+                    parsed, pairs, decision = route_search(
+                        q,
+                        valid_ads,
+                        searcher,
+                        top_n=TOP_N,
+                        strategy="auto",
+                    )
+                    st.session_state["search_results"] = (parsed, pairs, q, decision)
                     st.session_state["search_error"] = None
                 except Exception:
                     st.session_state["search_results"] = None
@@ -909,12 +920,12 @@ def main():
 
     # Results
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    parsed, pairs, last_query = st.session_state["search_results"]
+    parsed, pairs, last_query, decision = st.session_state["search_results"]
 
     if not pairs:
         _render_empty()
     else:
-        _render_results(parsed, pairs, last_query)
+        _render_results(parsed, pairs, last_query, decision)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from src.ranking.ranker import RankingWeights, rank
 from src.search.embedder import Embedder
 from src.search.filter import filter_ads
 from src.search.index_builder import build_faiss_index, build_id_map
+from src.search.router import route_search
 from src.search.semantic_search import SemanticSearch
 
 from .baseline import baseline_rank_ads
@@ -163,6 +164,87 @@ def evaluate_retrieval_variants(ads, cases: Sequence[EvaluationCase] = BENCHMARK
     }
 
 
+def evaluate_retrieval_by_k(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, ks: Sequence[int] = (5, 10, 15, 20)):
+    searcher = build_searcher(ads)
+    max_k = max(ks)
+    smart_rankings = []
+    baseline_rankings = []
+    semantic_only_rankings = []
+    auto_rankings = []
+
+    for case in cases:
+        parsed = parse_query(case.query)
+        smart_ids = _smart_rank(ads, searcher, case, max_k)
+        baseline_ids = baseline_rank_ads(ads, parsed)[:max_k]
+        semantic_ids = _semantic_only_rank(ads, searcher, case, max_k)
+        auto_ids = [str(result.ad.ad_id) for result, _, _ in route_search(case.query, ads, searcher, top_n=max_k, strategy="auto")[1]]
+
+        smart_rankings.append(_relevance_scores(case, smart_ids, max_k))
+        baseline_rankings.append(_relevance_scores(case, baseline_ids, max_k))
+        semantic_only_rankings.append(_relevance_scores(case, semantic_ids, max_k))
+        auto_rankings.append(_relevance_scores(case, auto_ids, max_k))
+
+    def _summaries(rankings):
+        return {
+            f"@{k}": summarise([r[:k] for r in rankings], k)
+            for k in ks
+        }
+
+    return {
+        "smart": _summaries(smart_rankings),
+        "baseline": _summaries(baseline_rankings),
+        "no_rerank": _summaries(semantic_only_rankings),
+        "auto": _summaries(auto_rankings),
+    }
+
+
+def evaluate_auto_strategy(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, k: int = 5):
+    searcher = build_searcher(ads)
+    auto_rankings = []
+    strategy_counts = {"baseline": 0, "smart": 0}
+    fallback_counts = {"baseline": 0, "smart": 0}
+
+    for case in cases:
+        parsed, pairs, decision = route_search(case.query, ads, searcher, top_n=k, strategy="auto")
+        ranked_ids = [str(result.ad.ad_id) for result, _, _ in pairs]
+        auto_rankings.append(_relevance_scores(case, ranked_ids, k))
+        strategy_counts[decision.strategy] += 1
+        if decision.fallback_from:
+            fallback_counts[decision.fallback_from] += 1
+
+    return {
+        "summary": summarise(auto_rankings, k),
+        "strategy_counts": strategy_counts,
+        "fallback_counts": fallback_counts,
+    }
+
+
+def evaluate_auto_strategy_by_k(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, ks: Sequence[int] = (5, 10, 15, 20)):
+    searcher = build_searcher(ads)
+    max_k = max(ks)
+    auto_rankings = []
+    strategy_counts = {"baseline": 0, "smart": 0}
+    fallback_counts = {"baseline": 0, "smart": 0}
+
+    for case in cases:
+        _, pairs, decision = route_search(case.query, ads, searcher, top_n=max_k, strategy="auto")
+        ranked_ids = [str(result.ad.ad_id) for result, _, _ in pairs]
+        auto_rankings.append(_relevance_scores(case, ranked_ids, max_k))
+        strategy_counts[decision.strategy] += 1
+        if decision.fallback_from:
+            fallback_counts[decision.fallback_from] += 1
+
+    summaries = {
+        f"@{k}": summarise([r[:k] for r in auto_rankings], k)
+        for k in ks
+    }
+    return {
+        "summaries": summaries,
+        "strategy_counts": strategy_counts,
+        "fallback_counts": fallback_counts,
+    }
+
+
 def evaluate_case_rows(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, k: int = 5):
     searcher = build_searcher(ads)
     rows = []
@@ -258,6 +340,29 @@ def evaluate_timings(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, rep
     }
 
 
+def evaluate_auto_timings(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, repeats: int = 3):
+    searcher = build_searcher(ads)
+    timings: list[float] = []
+    peaks: list[float] = []
+    for _ in range(repeats):
+        for case in cases:
+            tracemalloc.start()
+            t0 = time.perf_counter()
+            _ = route_search(case.query, ads, searcher, top_n=5, strategy="auto")
+            elapsed = (time.perf_counter() - t0) * 1000
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            timings.append(elapsed)
+            peaks.append(peak / 1024)
+
+    return TimingSummary(
+        name="auto",
+        mean_ms=statistics.mean(timings),
+        median_ms=statistics.median(timings),
+        peak_kb=statistics.mean(peaks),
+    )
+
+
 def evaluate_judge_sample(ads, cases: Sequence[EvaluationCase] = BENCHMARK_CASES, sample_size: int = 50, k: int = 5):
     rng = random.Random(42)
     all_pairs = [(case, ad) for case in cases for ad in ads]
@@ -299,16 +404,24 @@ def build_full_report(csv_path=SAMPLE_CSV, cases: Sequence[EvaluationCase] = BEN
     ads = load_and_prepare_ads(csv_path)
     nlu = evaluate_nlu(cases)
     retrieval = evaluate_retrieval_variants(ads, cases, k=k)
+    retrieval_by_k = evaluate_retrieval_by_k(ads, cases, ks=(5, 10, 15, 20))
+    auto = evaluate_auto_strategy(ads, cases, k=k)
+    auto_by_k = evaluate_auto_strategy_by_k(ads, cases, ks=(5, 10, 15, 20))
     case_rows = evaluate_case_rows(ads, cases, k=k)
     ablation = evaluate_ablation(ads, cases, k=k)
     timings = evaluate_timings(ads, cases)
+    auto_timing = evaluate_auto_timings(ads, cases)
     judge_sample = evaluate_judge_sample(ads, cases)
     return {
         "nlu": nlu,
         "retrieval": retrieval,
+        "retrieval_by_k": retrieval_by_k,
+        "auto": auto,
+        "auto_by_k": auto_by_k,
         "case_rows": case_rows,
         "ablation": ablation,
         "timings": timings,
+        "auto_timing": auto_timing,
         "judge_sample": judge_sample,
     }
 
@@ -329,6 +442,23 @@ def print_full_report(report: Dict[str, object]) -> None:
         print(f"  {name}: {_fmt_summary(summary)}")
     print()
 
+    print("Auto routing")
+    auto = report.get("auto", {})
+    summary = auto.get("summary")
+    if summary is not None:
+        print(f"  auto: {_fmt_summary(summary)}")
+    print(f"  strategy_counts={auto.get('strategy_counts', {})}")
+    print(f"  fallback_counts={auto.get('fallback_counts', {})}")
+    print()
+
+    auto_by_k = report.get("auto_by_k", {}).get("summaries", {})
+    if auto_by_k:
+        print("Auto routing across k")
+        for k_label in sorted(auto_by_k.keys(), key=lambda item: int(item.lstrip("@"))):
+            summary_k = auto_by_k[k_label]
+            print(f"  {k_label}: P={summary_k.precision_at_k:.3f} R={summary_k.recall_at_k:.3f} NDCG={summary_k.ndcg_at_k:.3f}")
+        print()
+
     print("Ablation")
     for name, summary in report["ablation"].items():
         print(f"  {name}: {_fmt_summary(summary)}")
@@ -337,6 +467,11 @@ def print_full_report(report: Dict[str, object]) -> None:
     print("Time / Memory")
     for name, timing in report["timings"].items():
         print(f"  {name}: mean={timing.mean_ms:.2f}ms median={timing.median_ms:.2f}ms peak={timing.peak_kb:.1f}KB")
+    auto_timing = report.get("auto_timing")
+    if auto_timing is not None:
+        print(
+            f"  auto: mean={auto_timing.mean_ms:.2f}ms median={auto_timing.median_ms:.2f}ms peak={auto_timing.peak_kb:.1f}KB"
+        )
     print()
 
     print("Judge sample")

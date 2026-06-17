@@ -18,6 +18,7 @@ from src.valuation.calculator import estimate_car_value
 from src.search.embedder import Embedder
 from src.search.filter import filter_ads
 from src.search.index_builder import build_faiss_index, build_id_map
+from src.search.router import route_search
 from src.search.semantic_search import SemanticSearch
 
 
@@ -38,19 +39,9 @@ SEARCHER = SemanticSearch(SEARCH_INDEX, build_id_map(ADS), EMBEDDER)
 AD_MAP = {str(ad.ad_id): ad for ad in ADS}
 
 
-def _smart_search(query: str, top_n: int = 10):
-    parsed = parse_query(query)
-    hits = SEARCHER.search(parsed.semantic_query, k=len(ADS))
-    candidates = [(AD_MAP[h.ad_id], h.score) for h in hits if h.ad_id in AD_MAP]
-    allowed_ids = {a.ad_id for a in filter_ads([ad for ad, _ in candidates], parsed.hard_constraints)}
-    filtered = [pair for pair in candidates if pair[0].ad_id in allowed_ids]
-    if not filtered:
-        return parsed, []
-    ranked = rank(filtered, parsed, RankingWeights())[:top_n]
-    return parsed, [
-        (result, explain(result.ad, parsed, result), build_insight_bundle(result.ad, parsed, result))
-        for result in ranked
-    ]
+def _search(query: str, top_n: int = 10, strategy: str = "auto"):
+    parsed, pairs, decision = route_search(query, ADS, SEARCHER, top_n=top_n, strategy=strategy)
+    return parsed, pairs, decision
 
 
 def _parse_int(value: str | None) -> int | None:
@@ -179,7 +170,7 @@ def _render_valuation_block(params: dict) -> str:
     """
 
 
-def _render_page(query: str = "", results=None, params: dict | None = None) -> str:
+def _render_page(query: str = "", results=None, params: dict | None = None, decision=None) -> str:
     params = params or {}
     result_cards = ""
     if results:
@@ -240,6 +231,19 @@ def _render_page(query: str = "", results=None, params: dict | None = None) -> s
         result_cards = """
         <div class="empty-state">
           כתוב חיפוש, למשל: רכב קטן לעיר, חסכוני, אוטומטי
+        </div>
+        """
+
+    strategy_html = ""
+    if decision is not None:
+        fallback_html = ""
+        if getattr(decision, "fallback_from", None):
+            fallback_html = f"<div class=\"strategy-fallback\">Fallback מ-{html.escape(str(decision.fallback_from))}: {html.escape(str(decision.fallback_reason or ''))}</div>"
+        strategy_html = f"""
+        <div class="strategy-banner strategy-{html.escape(str(decision.strategy))}">
+          <div class="strategy-label">נבחר מנוע: <b>{html.escape(str(decision.strategy).capitalize())}</b></div>
+          <div class="strategy-reason">{html.escape(str(decision.reason))}</div>
+          {fallback_html}
         </div>
         """
 
@@ -372,6 +376,22 @@ def _render_page(query: str = "", results=None, params: dict | None = None) -> s
     .results {{
       display: grid;
       gap: 14px;
+    }}
+    .strategy-banner {{
+      margin: 12px 0 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid #cfe2ff;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+    }}
+    .strategy-label {{
+      font-weight: 900;
+      color: #1d4ed8;
+    }}
+    .strategy-reason, .strategy-fallback {{
+      margin-top: 6px;
+      color: #334155;
+      line-height: 1.6;
     }}
     .card {{
       border-radius: 22px;
@@ -673,6 +693,7 @@ def _render_page(query: str = "", results=None, params: dict | None = None) -> s
         <h2>תוצאות</h2>
         <p>{html.escape(query) if query else 'כתוב שאילתה כדי לראות תוצאות.'}</p>
       </div>
+      {strategy_html}
       <div class="results">{result_cards}</div>
     </section>
 
@@ -726,9 +747,10 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         query = params.get("q", [""])[0].strip()
         results = []
+        decision = None
         if query:
-            _, results = _smart_search(query)
-        body = _render_page(query, results, params).encode("utf-8")
+            _, results, decision = _search(query, strategy="auto")
+        body = _render_page(query, results, params, decision).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -742,9 +764,10 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(raw_body)
             query = params.get("q", [""])[0].strip()
             results = []
+            decision = None
             if query:
-                _, results = _smart_search(query)
-            body = _render_page(query, results, params).encode("utf-8")
+                _, results, decision = _search(query, strategy="auto")
+            body = _render_page(query, results, params, decision).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
