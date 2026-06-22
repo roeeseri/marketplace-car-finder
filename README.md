@@ -1,28 +1,33 @@
-# חיפוש רכב חכם
+# Smart Car Finder
 
-מערכת חיפוש לרכבים יד שנייה בעברית. היא משלבת הבנת שאילתות, חיפוש סמנטי ודירוג מבוסס מאפייני רכב, כדי להפוך בקשה טבעית כמו "משפחתית חסכונית באזור חיפה" לתוצאות רלוונטיות ומוסברות.
+> A Hebrew-first used-car search application that combines structured filtering, semantic retrieval, and transparent ranking.
 
-האפליקציה כוללת מאגר דוגמה של מודעות רכב ופועלת מקומית, ללא מפתח API וללא שירות ענן.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Tests](https://img.shields.io/badge/tests-24%20passing-2EA44F)](#testing)
 
-## מה אפשר לעשות
+Smart Car Finder turns a natural-language car request into relevant, explainable used-car results. The included sample dataset lets the project run locally without API keys or cloud services.
 
-- לחפש בעברית חופשית, למשל לפי יצרן, דגם, תקציב, שנתון, קילומטראז', גיר, דלק ומיקום.
-- לקבל מסלול חיפוש מותאם אוטומטית: סינון מדויק לדרישות קשיחות או חיפוש סמנטי להעדפות חופשיות.
-- לראות הסבר לכל התאמה ותובנות על סוג הרכב.
-- להפעיל דוח הערכה פנימי של איכות החיפוש.
-- להשתמש במחשבון שווי מבוסס מודעות דומות.
+## Highlights
 
-## הפעלה מהירה
+- **Natural-language search** for make, model, budget, year, mileage, transmission, fuel type, and location.
+- **Auto Router** that selects either precise constraint-based search or semantic search for every request.
+- **Semantic retrieval** with `paraphrase-multilingual-MiniLM-L12-v2` and FAISS.
+- **Explainable ranking** based on relevance, vehicle quality, requested features, hard constraints, and location.
+- **Built-in evaluation** for NLU, retrieval, ranking variants, performance, and rule-based judging.
+- **Comparable-based valuation** with adjustments for year, mileage, ownership history, transmission, fuel, location, and condition.
 
-### דרישות
+## Quick Start
 
-- Python 3.10 ומעלה
+### Prerequisites
+
+- Python 3.10 or newer
 - `pip`
 
-### התקנה והרצה
+### Install and run
 
 ```bash
-git clone https://github.com/evronbar/marketplace-car-finder.git
+git clone https://github.com/roeeseri/marketplace-car-finder.git
 cd marketplace-car-finder
 
 python -m venv .venv
@@ -33,102 +38,124 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-לאחר ההרצה פתחו את הכתובת שמודפסת במסוף, בדרך כלל `http://localhost:8501`.
+Open the local address printed by Streamlit, usually `http://localhost:8501`.
 
-ב-Windows, הפעלת הסביבה הווירטואלית היא:
+On Windows, activate the virtual environment with:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-בהרצה הראשונה יורד מודל ההטמעות `paraphrase-multilingual-MiniLM-L12-v2`, ולאחר מכן הוא נשמר במטמון. אם המודל אינו זמין, המערכת משתמשת בייצוג גיבוי דטרמיניסטי כדי להישאר זמינה, אך איכות החיפוש הסמנטי תהיה נמוכה יותר.
+The first run downloads the embedding model and caches it locally. If the model cannot be loaded, the application keeps working with a deterministic fallback vectorizer, although semantic-search quality will be reduced.
 
-## נסו לחפש
+## Product Scope
 
-```text
-מאזדה 3 אוטומטית עד 70 אלף
-רכב משפחתי חסכוני באזור חיפה
-ג'יפון אמין לנסיעות ארוכות עד 100000
-רכב ראשון לנהג צעיר
-```
+The user interface and query parser are designed for Hebrew car-search requests. The repository documentation is intentionally written in English for an international developer audience.
 
-## ארכיטקטורה
+## Architecture
 
 ```mermaid
 flowchart TD
-    A[CSV מודעות] --> B[ניקוי ואימות נתונים]
-    B --> C[חילוץ מאפיינים מתיאור המודעה]
-    C --> D[MiniLM: הטמעות]
-    D --> E[FAISS: אינדקס וקטורי]
+    A[CSV listings] --> B[Preprocess and validate]
+    B --> C[Extract listing features]
+    C --> D[MiniLM embeddings]
+    D --> E[FAISS vector index]
 
-    Q[שאילתת משתמש] --> N[מנתח שאילתה]
+    Q[User query] --> N[Rule-based query parser]
     N --> R[Auto Router]
-    R -->|דרישות קשיחות| H[סינון ודירוג בסיסי]
-    R -->|העדפות חופשיות| S[MiniLM + FAISS]
-    S --> F[סינון דרישות קשיחות]
-    F --> K[דירוג רב-גורמי]
-    H --> X[הסברים ותובנות]
+    R -->|Structured constraints| H[Hard filtering and baseline ranking]
+    R -->|Natural-language preferences| S[MiniLM query embedding and FAISS search]
+    S --> F[Hard filtering]
+    F --> K[Multi-factor ranking]
+    H --> X[Explanations and vehicle insights]
     K --> X
-    X --> U[ממשק Streamlit]
+    X --> U[Streamlit interface]
 ```
 
-### רכיבי הליבה
+### Search pipeline
 
-| רכיב | תפקיד |
+1. Listings are loaded, normalized, validated, and enriched with keyword-based features.
+2. The embedding model converts listing text into vectors; FAISS stores them for similarity search.
+3. The query parser extracts hard constraints and soft preferences.
+4. Auto Router chooses a route:
+   - **Baseline** for short, highly structured requests with clear constraints.
+   - **Smart** for longer requests that contain intent or lifestyle preferences.
+5. Results are filtered against hard requirements, ranked, and returned with human-readable explanations.
+6. If the chosen route has no results, the router tries the alternative route automatically.
+
+## Core Components
+
+| Component | Responsibility |
 | --- | --- |
-| `src/nlu/query_parser.py` | מחלץ מהטקסט אילוצים קשיחים והעדפות רכות באמצעות כללים ומילונים. |
-| `src/search/embedder.py` | טוען את `paraphrase-multilingual-MiniLM-L12-v2` ומייצר הטמעות למודעות ולשאילתות. |
-| `src/search/index_builder.py` | בונה אינדקס `FAISS IndexFlatIP` לחיפוש וקטורי לפי דמיון קוסינוס. |
-| `src/search/router.py` | בוחר אוטומטית בין מסלול בסיסי למסלול סמנטי, עם מעבר למסלול החלופי כאשר אין תוצאות. |
-| `src/ranking/ranker.py` | משקלל דמיון סמנטי, איכות רכב, התאמת מאפיינים, אילוצים ומיקום. |
-| `src/valuation/calculator.py` | מעריך שווי לפי מודעות דומות, עם תיקונים לשנתון, קילומטראז', בעלים, גיר, דלק, מיקום ומצב. |
+| `src/nlu/query_parser.py` | Extracts hard constraints and soft preferences using rules and dictionaries. |
+| `src/search/embedder.py` | Loads `paraphrase-multilingual-MiniLM-L12-v2` and creates listing and query embeddings. |
+| `src/search/index_builder.py` | Builds a `FAISS IndexFlatIP` vector index for cosine-similarity retrieval. |
+| `src/search/router.py` | Chooses the search route and provides a fallback when a route returns no results. |
+| `src/ranking/ranker.py` | Combines semantic relevance, vehicle quality, feature fit, hard constraints, and location fit. |
+| `src/explanation/explainer.py` | Produces result-level explanations. |
+| `src/valuation/calculator.py` | Estimates value from comparable listings and explicit adjustment factors. |
 
-אין בפרויקט קריאה למודל LLM חיצוני. רכיב ההערכה בשם `llm_judge.py` בונה תבנית הערכה, אך בפועל מפעיל שיפוט כללי דטרמיניסטי.
+## Models and AI
 
-## מחשבון שווי
+The primary model is [`paraphrase-multilingual-MiniLM-L12-v2`](https://www.sbert.net/docs/sentence_transformer/pretrained_models.html), loaded through Sentence Transformers. It generates 384-dimensional multilingual embeddings for listings and search queries.
 
-מחשבון השווי בוחר קודם מודעות של אותו דגם, אחר כך אותו יצרן, אחר כך אותה קטגוריית רכב ולבסוף מאגר כללי. הוא מדרג את ההשוואות, מתקן את מחיריהן לפי נתוני רכב המטרה, ומחזיר:
+FAISS is the retrieval engine, not a model. It performs inner-product search over normalized vectors, which corresponds to cosine similarity.
 
-- מחיר מוערך: החציון של המחירים המתוקנים.
-- טווח נמוך וגבוה: רבעון תחתון ועליון כאשר יש מספיק השוואות.
-- רמת ביטחון, מספר מודעות להשוואה והנמקה קצרה.
+The application does **not** call an external LLM. `src/evaluation/llm_judge.py` contains a judge-prompt template, but its actual scoring is deterministic and rule-based.
 
-הרכיב זמין כמודול Python, אך אינו מוצג עדיין במסך החיפוש הראשי.
+## Valuation Engine
 
-## הרצה משורת הפקודה
+The valuation module selects comparable listings in this order:
 
-להדגמה מהירה של כל צינור החיפוש:
+1. Same make and model.
+2. Same make.
+3. Same inferred vehicle class.
+4. General comparable pool.
+
+It scores candidates, selects the strongest comparisons, then adjusts their prices for model year, mileage, ownership count, transmission, fuel type, location, and stated condition. The final estimate is the median adjusted price; the low and high values are derived from the adjusted-price distribution.
+
+The valuation engine is available as a Python module. It is not yet exposed in the main Streamlit screen.
+
+## Command-Line Demo
+
+Run the complete search pipeline from the command line:
 
 ```bash
-python main.py "מאזדה 3 אוטומטית עד 70 אלף"
+python main.py
 ```
 
-## בדיקות
+Pass a query as an argument to override the built-in example:
+
+```bash
+python main.py "Mazda 3 automatic under 70000"
+```
+
+## Testing
 
 ```bash
 pytest -q
 ```
 
-הבדיקות מכסות טעינת נתונים, אימות, קיבוץ מיקומים, מדדי הערכה, תובנות רכב ומחשבון השווי.
+The test suite covers data loading and validation, location grouping, evaluation metrics, vehicle insights, and the valuation engine.
 
-## מבנה הפרויקט
+## Project Structure
 
 ```text
-app.py                  ממשק Streamlit
-main.py                 הדגמת חיפוש במסוף
-config.py               נתיבים והגדרות מרכזיות
-data/raw/               מאגר הדוגמה
-src/data/               טעינה, ניקוי, אימות וחילוץ מאפיינים
-src/nlu/                פירוק שאילתות בעברית
-src/search/             הטמעות, אינדוקס, חיפוש וניתוב
-src/ranking/            דירוג תוצאות
-src/explanation/        הסברים לתוצאות
-src/knowledge/          תובנות לפי סוג רכב
-src/valuation/          מחשבון שווי
-src/evaluation/         מדידה והשוואת אסטרטגיות
-tests/                  בדיקות אוטומטיות
+app.py                  Streamlit application
+main.py                 Command-line search demo
+config.py               Central paths and configuration
+data/raw/               Included sample listings
+src/data/               Loading, preprocessing, validation, and feature extraction
+src/nlu/                Hebrew query parsing
+src/search/             Embeddings, indexing, retrieval, filtering, and routing
+src/ranking/            Result ranking
+src/explanation/        Search-result explanations
+src/knowledge/          Vehicle-class insights
+src/valuation/          Comparable-based valuation
+src/evaluation/         Metrics and evaluation reports
+tests/                  Automated tests
 ```
 
-## נתונים והסתייגויות
+## Notes
 
-הפרויקט מיועד להדגמה וללמידה. הערכת השווי והתוצאות תלויות באיכות ובהיקף מודעות הדוגמה, ואינן תחליף לבדיקה מקצועית או למחירון רשמי.
+This project is intended for learning and demonstration. Search quality and valuation outputs depend on the scope and quality of the included sample listings; they are not a substitute for a professional inspection or an official pricing guide.
